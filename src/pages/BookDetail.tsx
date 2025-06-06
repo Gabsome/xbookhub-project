@@ -22,6 +22,7 @@ const BookDetail: React.FC = () => {
   const [isOffline, setIsOffline] = useState(false);
   const [readingContent, setReadingContent] = useState<string | null>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
+  
 
   useEffect(() => {
     const fetchBook = async () => {
@@ -69,21 +70,29 @@ const BookDetail: React.FC = () => {
     }
   };
 
-  const handleToggleOffline = async () => {
-    if (!book) return;
-    
-    try {
-      if (isOffline) {
-        await removeOfflineBook(book.id);
-        setIsOffline(false);
-      } else {
-        await saveBookOffline(book);
-        setIsOffline(true);
-      }
-    } catch (err) {
-      console.error('Error with offline book:', err);
+ const handleToggleOffline = async () => {
+  if (!book) {
+    console.warn('No book selected to toggle offline status.');
+    return;
+  }
+
+  try {
+    if (isOffline) {
+      await removeOfflineBook(book.id);
+      setIsOffline(false);
+      console.log(`Book (ID: ${book.id}) removed from offline storage.`);
+    } else {
+      console.log(`Attempting to save book (ID: ${book.id}) offline...`);
+      await saveBookOffline(book);
+      setIsOffline(true);
+      console.log(`Book (ID: ${book.id}) saved to offline storage.`);
     }
-  };
+  } catch (err) {
+    console.error('Error handling offline storage:', err);
+    alert('Failed to save/remove book for offline use. See console for details.');
+  }
+};
+
 
   const handleShareBook = () => {
     if (navigator.share && book) {
@@ -99,33 +108,36 @@ const BookDetail: React.FC = () => {
     }
   };
 
-  const fetchBookContent = async () => {
-    if (!book) return;
-    
-    try {
-      setLoading(true);
-      
-      // Try to get HTML content first, then plaintext
-      const contentUrl = book.formats['text/html'] || book.formats['text/plain'];
-      
-      if (!contentUrl) {
-        setError('No readable content available for this book.');
-        return;
-      }
-      
-      const response = await fetch(contentUrl);
-      if (!response.ok) throw new Error('Failed to fetch book content');
-      
-      const content = await response.text();
-      setReadingContent(content);
-      setIsReadingMode(true);
-    } catch (err) {
-      console.error('Error fetching book content:', err);
-      setError('Failed to load book content. Please try again later.');
-    } finally {
-      setLoading(false);
+ const fetchBookContent = async () => {
+  if (!book) return;
+
+  try {
+    setLoading(true);
+    setError(null);
+
+    const contentUrl = book.formats['text/html'] || book.formats['text/plain'];
+    if (!contentUrl) {
+      setError('No readable content available for this book.');
+      return; // Stop execution here if no URL
     }
-  };
+
+    const proxyUrl = `http://localhost:5000/api/fetch-book?url=${encodeURIComponent(contentUrl)}`;
+
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error('Failed to fetch book content');
+
+    const content = await response.text();
+    setReadingContent(content);
+    setIsReadingMode(true);
+  } catch (err) {
+    console.error('Error fetching book content:', err);
+    setError('Failed to load book content. Please try again later.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   if (loading) {
     return (

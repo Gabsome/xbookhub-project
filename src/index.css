@@ -112,3 +112,13 @@
     background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23b45309' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M0 20L20 0h20v20L20 40H0V20zm10 17l15-15L40 7V0h-3L22 15 7 0H0v7l15 15L0 37v3h7l15-15 15 15h3v-7L25 18z'/%3E%3C/g%3E%3C/svg%3E");
   }
 }
+/* In your index.css or App.css */
+.perspective {
+  perspective: 1200px;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+}
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}

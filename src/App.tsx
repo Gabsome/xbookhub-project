@@ -14,6 +14,7 @@ import NotFound from './pages/NotFound';
 // Components
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import IntroAnimation from './components/IntroAnimation';
 
 // Context
 import { ThemeProvider } from './context/ThemeContext';
@@ -28,43 +29,55 @@ function App() {
     fontSize: 'medium',
   });
 
+  const [showIntro, setShowIntro] = useState(true);
+
   useEffect(() => {
     // Apply theme class to the body
     document.body.className = `theme-${settings.theme}`;
-    
+
     // Apply font size class
-    document.documentElement.style.fontSize = 
-      settings.fontSize === 'small' ? '14px' : 
+    document.documentElement.style.fontSize =
+      settings.fontSize === 'small' ? '14px' :
       settings.fontSize === 'large' ? '18px' : '16px';
   }, [settings]);
 
   return (
     <MotionConfig reducedMotion="user">
-      <AuthProvider>
-        <ThemeProvider initialTheme={settings.theme} setSettings={setSettings}>
-          <Router>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/" element={<Layout />}>
-                <Route index element={<Home />} />
-                <Route path="book/:id" element={<BookDetail />} />
-                <Route path="saved" element={
-                  <ProtectedRoute>
-                    <SavedBooks />
-                  </ProtectedRoute>
-                } />
-                <Route path="settings" element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                } />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </Router>
-        </ThemeProvider>
-      </AuthProvider>
+      {showIntro ? (
+        <IntroAnimation onComplete={() => setShowIntro(false)} />
+      ) : (
+        <AuthProvider>
+          <ThemeProvider initialTheme={settings.theme} setSettings={setSettings}>
+            <Router>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/" element={<Layout />}>
+                  <Route index element={<Home />} />
+                  <Route path="book/:id" element={<BookDetail />} />
+                  <Route
+                    path="saved"
+                    element={
+                      <ProtectedRoute>
+                        <SavedBooks />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="settings"
+                    element={
+                      <ProtectedRoute>
+                        <Settings />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Route>
+              </Routes>
+            </Router>
+          </ThemeProvider>
+        </AuthProvider>
+      )}
     </MotionConfig>
   );
 }
