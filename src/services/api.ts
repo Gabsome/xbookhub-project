@@ -1,7 +1,7 @@
 import { BooksApiResponse, Book } from '../types';
 
 const BASE_URL = 'https://gutendex.com';
-const PROXY_URL = 'http://localhost:5000/api/fetch-book';
+const PROXY_URL = 'https://xbookhub.onrender.com/api/fetch-book';
 
 // Enhanced fetch with retry logic and better error handling
 const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 3): Promise<Response> => {
