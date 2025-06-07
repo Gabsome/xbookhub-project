@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   ArrowLeft, Bookmark, Download, Share, Book as BookIcon,
-  Calendar, Clock, Users
+  Calendar, Clock, Users, FileText, File, Loader2
 } from 'lucide-react';
-import { fetchBookById } from '../services/api';
+import { fetchBookById, fetchBookContent, downloadBookAsFile, downloadBookAsPDF } from '../services/api';
 import { saveBook, getSavedBooks, removeSavedBook } from '../services/api';
 import { saveBookOffline, isBookAvailableOffline, removeOfflineBook } from '../services/offline';
 import { useAuth } from '../context/AuthContext';
@@ -22,12 +22,15 @@ const BookDetail: React.FC = () => {
   const [isOffline, setIsOffline] = useState(false);
   const [readingContent, setReadingContent] = useState<string | null>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
-  
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<'txt' | 'html' | 'pdf'>('txt');
 
   useEffect(() => {
     const fetchBook = async () => {
       try {
         setLoading(true);
+        setError(null);
         if (!id) return;
         
         // Fetch book details
@@ -45,7 +48,7 @@ const BookDetail: React.FC = () => {
         setIsOffline(offlineStatus);
       } catch (err) {
         console.error('Error fetching book:', err);
-        setError('Failed to load book details. Please try again later.');
+        setError(err instanceof Error ? err.message : 'Failed to load book details. Please try again later.');
       } finally {
         setLoading(false);
       }
@@ -70,29 +73,28 @@ const BookDetail: React.FC = () => {
     }
   };
 
- const handleToggleOffline = async () => {
-  if (!book) {
-    console.warn('No book selected to toggle offline status.');
-    return;
-  }
-
-  try {
-    if (isOffline) {
-      await removeOfflineBook(book.id);
-      setIsOffline(false);
-      console.log(`Book (ID: ${book.id}) removed from offline storage.`);
-    } else {
-      console.log(`Attempting to save book (ID: ${book.id}) offline...`);
-      await saveBookOffline(book);
-      setIsOffline(true);
-      console.log(`Book (ID: ${book.id}) saved to offline storage.`);
+  const handleToggleOffline = async () => {
+    if (!book) {
+      console.warn('No book selected to toggle offline status.');
+      return;
     }
-  } catch (err) {
-    console.error('Error handling offline storage:', err);
-    alert('Failed to save/remove book for offline use. See console for details.');
-  }
-};
 
+    try {
+      if (isOffline) {
+        await removeOfflineBook(book.id);
+        setIsOffline(false);
+        console.log(`Book (ID: ${book.id}) removed from offline storage.`);
+      } else {
+        console.log(`Attempting to save book (ID: ${book.id}) offline...`);
+        await saveBookOffline(book);
+        setIsOffline(true);
+        console.log(`Book (ID: ${book.id}) saved to offline storage.`);
+      }
+    } catch (err) {
+      console.error('Error handling offline storage:', err);
+      alert('Failed to save/remove book for offline use. See console for details.');
+    }
+  };
 
   const handleShareBook = () => {
     if (navigator.share && book) {
@@ -108,53 +110,63 @@ const BookDetail: React.FC = () => {
     }
   };
 
- const fetchBookContent = async () => {
-  if (!book) return;
+  const fetchBookContentForReading = async () => {
+    if (!book) return;
 
-  try {
-    setLoading(true);
-    setError(null);
+    try {
+      setIsLoadingContent(true);
+      setError(null);
 
-    const contentUrl = book.formats['text/html'] || book.formats['text/plain'];
-    if (!contentUrl) {
-      setError('No readable content available for this book.');
-      return; // Stop execution here if no URL
+      const content = await fetchBookContent(book);
+      setReadingContent(content);
+      setIsReadingMode(true);
+    } catch (err) {
+      console.error('Error fetching book content:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load book content. Please try again later.');
+    } finally {
+      setIsLoadingContent(false);
     }
+  };
 
-    const proxyUrl = `http://localhost:5000/api/fetch-book?url=${encodeURIComponent(contentUrl)}`;
+  const handleDownload = async () => {
+    if (!book) return;
 
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error('Failed to fetch book content');
+    try {
+      setIsDownloading(true);
+      setError(null);
 
-    const content = await response.text();
-    setReadingContent(content);
-    setIsReadingMode(true);
-  } catch (err) {
-    console.error('Error fetching book content:', err);
-    setError('Failed to load book content. Please try again later.');
-  } finally {
-    setLoading(false);
-  }
-};
-
-
+      if (downloadFormat === 'pdf') {
+        await downloadBookAsPDF(book);
+      } else {
+        await downloadBookAsFile(book, downloadFormat);
+      }
+    } catch (err) {
+      console.error('Error downloading book:', err);
+      setError(err instanceof Error ? err.message : 'Failed to download book. Please try again.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[60vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-amber-700"></div>
+        <div className="flex items-center space-x-3">
+          <Loader2 className="h-8 w-8 animate-spin text-amber-700 dark:text-amber-500" />
+          <span className="text-amber-800 dark:text-amber-400">Loading book details...</span>
+        </div>
       </div>
     );
   }
 
-  if (error) {
+  if (error && !book) {
     return (
       <div className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-6 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Error</h2>
         <p>{error}</p>
         <button 
           onClick={() => navigate(-1)}
-          className="mt-4 flex items-center text-amber-900 dark:text-amber-400"
+          className="mt-4 flex items-center text-amber-900 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
         >
           <ArrowLeft className="h-5 w-5 mr-1" /> Go Back
         </button>
@@ -171,7 +183,7 @@ const BookDetail: React.FC = () => {
         </h2>
         <button 
           onClick={() => navigate('/')}
-          className="mt-4 flex items-center mx-auto text-amber-900 dark:text-amber-400"
+          className="mt-4 flex items-center mx-auto text-amber-900 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
         >
           <ArrowLeft className="h-5 w-5 mr-1" /> Return to Home
         </button>
@@ -185,7 +197,7 @@ const BookDetail: React.FC = () => {
         <div className="flex items-center justify-between mb-6">
           <button 
             onClick={() => setIsReadingMode(false)}
-            className="flex items-center text-amber-900 dark:text-amber-400"
+            className="flex items-center text-amber-900 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
           >
             <ArrowLeft className="h-5 w-5 mr-1" /> Back to Details
           </button>
@@ -223,7 +235,7 @@ const BookDetail: React.FC = () => {
           </h1>
           
           <div 
-            className="prose prose-amber dark:prose-invert max-w-none font-serif" 
+            className="prose prose-amber dark:prose-invert max-w-none font-serif text-amber-900 dark:text-amber-100" 
             dangerouslySetInnerHTML={{ __html: readingContent }}
           />
         </div>
@@ -239,10 +251,16 @@ const BookDetail: React.FC = () => {
     >
       <button 
         onClick={() => navigate(-1)}
-        className="flex items-center text-amber-900 dark:text-amber-400 mb-6"
+        className="flex items-center text-amber-900 dark:text-amber-400 mb-6 hover:text-amber-700 dark:hover:text-amber-300"
       >
         <ArrowLeft className="h-5 w-5 mr-1" /> Back to Books
       </button>
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded-md mb-6">
+          <p>{error}</p>
+        </div>
+      )}
       
       <div className="bg-amber-50 dark:bg-gray-900 border border-amber-200 dark:border-gray-800 rounded-lg overflow-hidden shadow-lg">
         <div className="md:flex">
@@ -389,32 +407,95 @@ const BookDetail: React.FC = () => {
                 </div>
               </div>
               
-              <div className="mt-10 flex flex-wrap gap-4">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={fetchBookContent}
-                  className="px-6 py-3 bg-amber-700 dark:bg-amber-800 text-white rounded-lg 
-                    shadow-md hover:bg-amber-800 dark:hover:bg-amber-700 transition-colors
-                    flex items-center font-medium"
-                >
-                  <Clock className="h-5 w-5 mr-2" /> 
-                  Read Now
-                </motion.button>
+              <div className="mt-10 space-y-4">
+                <div className="flex flex-wrap gap-4">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={fetchBookContentForReading}
+                    disabled={isLoadingContent}
+                    className="px-6 py-3 bg-amber-700 dark:bg-amber-800 text-white rounded-lg 
+                      shadow-md hover:bg-amber-800 dark:hover:bg-amber-700 transition-colors
+                      flex items-center font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoadingContent ? (
+                      <>
+                        <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <Clock className="h-5 w-5 mr-2" /> 
+                        Read Now
+                      </>
+                    )}
+                  </motion.button>
+                  
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleToggleOffline}
+                    className={`px-6 py-3 rounded-lg shadow-md flex items-center font-medium ${
+                      isOffline
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800'
+                        : 'bg-amber-100 text-amber-800 dark:bg-gray-800 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <Download className="h-5 w-5 mr-2" />
+                    {isOffline ? 'Saved Offline' : 'Save for Offline'}
+                  </motion.button>
+                </div>
                 
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleToggleOffline}
-                  className={`px-6 py-3 rounded-lg shadow-md flex items-center font-medium ${
-                    isOffline
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800'
-                      : 'bg-amber-100 text-amber-800 dark:bg-gray-800 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <Download className="h-5 w-5 mr-2" />
-                  {isOffline ? 'Saved Offline' : 'Save for Offline'}
-                </motion.button>
+                {/* Download Section */}
+                <div className="bg-amber-100 dark:bg-gray-800 p-4 rounded-lg border border-amber-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-300 mb-3">
+                    Download to Device
+                  </h3>
+                  
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select
+                      value={downloadFormat}
+                      onChange={(e) => setDownloadFormat(e.target.value as 'txt' | 'html' | 'pdf')}
+                      className="px-3 py-2 border border-amber-300 dark:border-gray-600 rounded-md 
+                        bg-white dark:bg-gray-900 text-amber-900 dark:text-amber-100
+                        focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    >
+                      <option value="txt">Text (.txt)</option>
+                      <option value="html">HTML (.html)</option>
+                      <option value="pdf">PDF (.pdf)</option>
+                    </select>
+                    
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleDownload}
+                      disabled={isDownloading}
+                      className="px-4 py-2 bg-amber-600 dark:bg-amber-700 text-white rounded-md 
+                        hover:bg-amber-700 dark:hover:bg-amber-600 transition-colors
+                        flex items-center font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          {downloadFormat === 'pdf' ? (
+                            <File className="h-4 w-4 mr-2" />
+                          ) : (
+                            <FileText className="h-4 w-4 mr-2" />
+                          )}
+                          Download {downloadFormat.toUpperCase()}
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+                  
+                  <p className="text-xs text-amber-700 dark:text-amber-500 mt-2">
+                    Downloads will be saved to your device's Downloads folder
+                  </p>
+                </div>
               </div>
             </motion.div>
           </div>

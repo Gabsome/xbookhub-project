@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Book, Bookmark, Download } from 'lucide-react';
+import { Book, Bookmark, Download, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Book as BookType } from '../types';
 import { saveBook } from '../services/api';
@@ -15,6 +15,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
   const { currentUser } = useAuth();
   const [isSaved, setIsSaved] = React.useState(false);
   const [isOffline, setIsOffline] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(false);
 
   // Check if book is saved offline
   React.useEffect(() => {
@@ -30,11 +31,15 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
     e.stopPropagation();
     
     if (currentUser) {
-      await saveBook(book, currentUser.id);
-      setIsSaved(true);
-      
-      // Show temporary notification
-      setTimeout(() => setIsSaved(false), 1500);
+      try {
+        await saveBook(book, currentUser.id);
+        setIsSaved(true);
+        
+        // Show temporary notification
+        setTimeout(() => setIsSaved(false), 1500);
+      } catch (error) {
+        console.error('Failed to save book:', error);
+      }
     } else {
       alert('Please log in to save books');
     }
@@ -44,14 +49,23 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
     e.preventDefault();
     e.stopPropagation();
     
+    if (isLoading) return;
+    
     try {
+      setIsLoading(true);
       await saveBookOffline(book);
       setIsOffline(true);
       
       // Show temporary notification
-      setTimeout(() => setIsOffline(prev => prev), 1500);
+      setTimeout(() => {
+        // Keep the offline status as true since it's actually saved
+      }, 1500);
     } catch (error) {
       console.error('Failed to save book offline:', error);
+      // Show user-friendly error message
+      alert('Failed to save book for offline reading. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -71,6 +85,11 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
             alt={`Cover for ${book.title}`}
             className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 
               hover:scale-105"
+            loading="lazy"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = 'https://placehold.co/200x300/e9d8b6/453a22?text=No+Cover';
+            }}
           />
         </div>
         
@@ -103,10 +122,10 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={handleSaveBook}
-          className={`p-2 rounded-full ${
+          className={`p-2 rounded-full transition-colors ${
             isSaved 
               ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' 
-              : 'bg-amber-100 text-amber-800 dark:bg-gray-700 dark:text-amber-400'
+              : 'bg-amber-100 text-amber-800 dark:bg-gray-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-gray-600'
           }`}
           aria-label="Save to my books"
         >
@@ -116,14 +135,19 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={handleSaveOffline}
-          className={`p-2 rounded-full ${
+          disabled={isLoading}
+          className={`p-2 rounded-full transition-colors ${
             isOffline 
               ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' 
-              : 'bg-amber-100 text-amber-800 dark:bg-gray-700 dark:text-amber-400'
-          }`}
+              : 'bg-amber-100 text-amber-800 dark:bg-gray-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-gray-600'
+          } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           aria-label="Save for offline reading"
         >
-          <Download className="h-5 w-5" />
+          {isLoading ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <Download className="h-5 w-5" />
+          )}
         </motion.button>
       </div>
       
@@ -131,7 +155,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
       <div className="absolute bottom-2 right-2 flex items-center gap-1 text-xs bg-amber-100 
         dark:bg-gray-700 text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
         <Book className="h-3 w-3" />
-        <span>{book.download_count}</span>
+        <span>{book.download_count.toLocaleString()}</span>
       </div>
     </motion.div>
   );
