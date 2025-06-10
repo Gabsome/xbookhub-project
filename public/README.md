@@ -339,8 +339,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 **Gabriel Maina Mwangi**
-- Email: gabriel.maina@example.com
-- GitHub: [@gabrielmaina](https://github.com/gabrielmaina)
+- Email: gabsometrex@gmail.com
+- GitHub: [@gabrielmaina](https://github.com/---)
 - Location: Nakuru, Kenya
 
 ---

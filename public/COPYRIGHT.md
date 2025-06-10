@@ -2,18 +2,17 @@
 
 ## Copyright Information
 
-**Copyright © 2024 Gabriel Maina Mwangi. All rights reserved.**
+**Copyright © 2025 Gabriel Maina Mwangi. All rights reserved.**
 
 This document serves as the official copyright notice for Xbook-Hub and all associated materials, code, documentation, and intellectual property.
 
 ## Ownership Declaration
 
 ### Primary Copyright Holder
-
-**Gabriel Maina Mwangi**  
+**Gabriel Maina Mwangi**
 Location: Nakuru, Kenya  
-Email: gabriel.maina@xbook-hub.com  
-Date of Creation: December 2024
+Email: gabsometrex@gmail.com
+Date of Creation: June 2025
 
 ### Scope of Copyright
 
@@ -94,7 +93,7 @@ The original code of Xbook-Hub is released under the MIT License:
 ```
 MIT License
 
-Copyright (c) 2024 Gabriel Maina Mwangi
+Copyright (c) 2025 Gabriel Maina Mwangi
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -133,7 +132,7 @@ SOFTWARE.
 
 - **Work Title**: Xbook-Hub - Vintage Book Reading Platform
 - **Author**: Gabriel Maina Mwangi
-- **Creation Date**: December 2024
+- **Creation Date**: June 2025
 - **Registration Status**: Pending formal registration
 - **Jurisdiction**: Kenya, with international protections under applicable treaties
 
@@ -259,8 +258,8 @@ Updates will be communicated through:
 
 ---
 
-**This copyright notice is effective as of December 2024 and supersedes all previous copyright notices for this work.**
+**This copyright notice is effective as of June 2025 and supersedes all previous copyright notices for this work.**
 
 **For the most current version of this copyright notice, please visit: https://xbook-hub.com/copyright**
 
-**© 2024 Gabriel Maina Mwangi. All rights reserved worldwide.**
+**© 2025 Gabriel Maina Mwangi. All rights reserved worldwide.**

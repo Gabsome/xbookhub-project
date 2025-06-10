@@ -33,7 +33,7 @@ const Footer: React.FC = () => {
               <ul className="mt-4 space-y-2">
                 <li>
                   <span className="text-amber-700 dark:text-amber-500 text-sm italic">
-                    "Whatever our souls are made of, hers and mine are the same." 💞
+                    "A little time for a little smile" 🙂📚
                   </span>
                 </li>
                 <li>

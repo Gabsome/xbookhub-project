@@ -1,7 +1,7 @@
 # Privacy Policy
 
-**Effective Date**: December 2024  
-**Last Updated**: December 2024
+**Effective Date**: June 2025  
+**Last Updated**: June 2025
 
 ## Introduction
 
@@ -229,13 +229,13 @@ For privacy-related questions or requests:
 **Gabriel Maina Mwangi**  
 Xbook-Hub  
 Nakuru, Kenya  
-Email: contact@xbook-hub.com
+Email: gabsometrex@gmail.com
 
 ### Data Protection Officer
 
 For GDPR-related inquiries:
 
-- **Email**: dpo@xbook-hub.com
+- **Email**: gabsometrex@gmail.com
 - **Postal Address**: Available upon request
 
 ## Definitions
@@ -247,6 +247,6 @@ For GDPR-related inquiries:
 
 ---
 
-**Copyright © 2024 Gabriel Maina Mwangi. All rights reserved.**
+**Copyright © 2025 Gabriel Maina Mwangi. All rights reserved.**
 
 This Privacy Policy is effective as of the date listed above and will remain in effect except with respect to any changes in its provisions in the future, which will be in effect immediately after being posted on this page.

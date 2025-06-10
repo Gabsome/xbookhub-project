@@ -1,7 +1,7 @@
 # Terms of Service
 
-**Effective Date**: December 2024  
-**Last Updated**: December 2024
+**Effective Date**: June 2025  
+**Last Updated**: June 2025
 
 ## Agreement to Terms
 
@@ -262,7 +262,7 @@ Continued use of the Service after updates constitutes acceptance of the new Ter
 **Gabriel Maina Mwangi**  
 Xbook-Hub  
 Nakuru, Kenya  
-Email: contact@xbook-hub.com
+Email: gabsometrex@gmail.com
 
 ### Legal Notices
 
@@ -280,7 +280,7 @@ For legal notices and formal communications:
 
 ---
 
-**Copyright © 2024 Gabriel Maina Mwangi. All rights reserved.**
+**Copyright © 2025 Gabriel Maina Mwangi. All rights reserved.**
 
 These Terms of Service are effective as of the date listed above and will remain in effect except with respect to any changes in their provisions in the future, which will be in effect immediately after being posted on this page.
 

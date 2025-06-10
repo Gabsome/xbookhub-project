@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import pageFlipSound from '../sounds/one-page-book-flip-101928.mp3';
-import roseImage from '../assets/rose.jpg'; // Ensure the path is correct
+import booksImage from '../assets/books.jpg'; // Ensure the path is correct
 
 const IntroAnimation = ({ onComplete }: { onComplete: () => void }) => {
   const [show, setShow] = useState(true);
@@ -64,12 +64,12 @@ const IntroAnimation = ({ onComplete }: { onComplete: () => void }) => {
                 transition={{ delay: 0.4, duration: 1 }}
               >
                 <div className="text-center text-4xl leading-snug sm:text-5xl">
-                  Someone to<br />
-                  <span className="text-5xl sm:text-6xl font-bold mt-2">LYNN on.</span>
+                  Welcome to<br />
+                  <span className="text-5xl sm:text-6xl font-bold mt-2">XBook-Hub.</span>
                 </div>
                 <img
-                  src={roseImage}
-                  alt="Rose"
+                  src={booksImage}
+                  alt="Books"
                   className="w-20 sm:w-24 mt-6 object-contain select-none"
                   draggable={false}
                 />

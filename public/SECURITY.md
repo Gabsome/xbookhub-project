@@ -194,8 +194,8 @@ Our security incident response team includes:
 
 ---
 
-**Last Updated**: December 2024
+**Last Updated**: June 2025
 **Version**: 1.0
-**Next Review**: March 2025
+**Next Review**: December 2025
 
 For questions about this security policy, please contact: security@xbook-hub.com

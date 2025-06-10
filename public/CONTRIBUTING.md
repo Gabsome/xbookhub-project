@@ -85,7 +85,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be repor
 
 1. **Clone and install**
    ```bash
-   git clone https://github.com/gabrielmaina/xbook-hub.git
+   git clone https://github.com/____/xbook-hub.git
    cd xbook-hub
    npm install
    cd server && npm install && cd ..
