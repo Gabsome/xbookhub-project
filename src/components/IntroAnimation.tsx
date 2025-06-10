@@ -65,12 +65,12 @@ const IntroAnimation = ({ onComplete }: { onComplete: () => void }) => {
               >
                 <div className="text-center text-4xl leading-snug sm:text-5xl">
                   Welcome to<br />
-                  <span className="text-5xl sm:text-6xl font-bold mt-2">XBook-Hub.</span>
+                  <span className="text-5xl sm:text-6xl font-bold mt-2">Xbook-Hub.</span>
                 </div>
                 <img
                   src={booksImage}
                   alt="Books"
-                 className="w-24 sm:w-32 mt-6 sm:mt-8 object-contain select-none"
+                 className="w-40 sm:w-52 mt-10 sm:mt-12 object-contain select-none"
                   draggable={false}
                 />
               </motion.div>
