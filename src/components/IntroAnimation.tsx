@@ -70,7 +70,7 @@ const IntroAnimation = ({ onComplete }: { onComplete: () => void }) => {
                 <img
                   src={booksImage}
                   alt="Books"
-                  className="w-20 sm:w-24 mt-6 object-contain select-none"
+                 className="w-24 sm:w-32 mt-6 sm:mt-8 object-contain select-none"
                   draggable={false}
                 />
               </motion.div>
