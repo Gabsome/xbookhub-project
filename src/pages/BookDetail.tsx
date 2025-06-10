@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   ArrowLeft, Bookmark, Download, Share, Book as BookIcon,
-  Calendar, Clock, Users, FileText, File, Loader2
+  Calendar, Clock, Users, FileText, File, Loader2, Globe, Archive, Library
 } from 'lucide-react';
 import { fetchBookById, fetchBookContent, downloadBookAsFile, downloadBookAsPDF } from '../services/api';
 import { saveBook, getSavedBooks, removeSavedBook } from '../services/api';
@@ -33,18 +33,21 @@ const BookDetail: React.FC = () => {
         setError(null);
         if (!id) return;
         
+        // Determine if ID is numeric (Gutenberg) or string (Open Library/Archive)
+        const bookId = /^\d+$/.test(id) ? Number(id) : id;
+        
         // Fetch book details
-        const bookData = await fetchBookById(Number(id));
+        const bookData = await fetchBookById(bookId);
         setBook(bookData);
         
         // Check if book is saved
         if (currentUser) {
           const savedBooks = getSavedBooks(currentUser.id);
-          setIsSaved(savedBooks.some(savedBook => savedBook.id === Number(id)));
+          setIsSaved(savedBooks.some(savedBook => savedBook.id === bookId));
         }
         
         // Check if book is available offline
-        const offlineStatus = await isBookAvailableOffline(Number(id));
+        const offlineStatus = await isBookAvailableOffline(bookId);
         setIsOffline(offlineStatus);
       } catch (err) {
         console.error('Error fetching book:', err);
@@ -148,6 +151,38 @@ const BookDetail: React.FC = () => {
     }
   };
 
+  // Get source icon and name
+  const getSourceInfo = () => {
+    if (!book) return { icon: <BookIcon className="h-4 w-4" />, name: 'Unknown' };
+    
+    switch (book.source) {
+      case 'gutenberg':
+        return { icon: <Globe className="h-4 w-4" />, name: 'Project Gutenberg' };
+      case 'openlibrary':
+        return { icon: <Library className="h-4 w-4" />, name: 'Open Library' };
+      case 'archive':
+        return { icon: <Archive className="h-4 w-4" />, name: 'Internet Archive' };
+      default:
+        return { icon: <BookIcon className="h-4 w-4" />, name: 'Unknown Source' };
+    }
+  };
+
+  // Get cover image
+  const getCoverImage = () => {
+    if (!book) return 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover';
+    
+    if (book.formats['image/jpeg']) {
+      return book.formats['image/jpeg'];
+    }
+    
+    // For Open Library books, try to construct cover URL
+    if (book.source === 'openlibrary' && book.cover_id) {
+      return `https://covers.openlibrary.org/b/id/${book.cover_id}-L.jpg`;
+    }
+    
+    return 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover';
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[60vh]">
@@ -202,7 +237,13 @@ const BookDetail: React.FC = () => {
             <ArrowLeft className="h-5 w-5 mr-1" /> Back to Details
           </button>
           
-          <div className="flex space-x-3">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-1 text-xs bg-amber-100 dark:bg-gray-800 
+              text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
+              {getSourceInfo().icon}
+              <span>{getSourceInfo().name}</span>
+            </div>
+            
             <button 
               onClick={handleSaveBook}
               className={`p-2 rounded-full ${
@@ -243,6 +284,8 @@ const BookDetail: React.FC = () => {
     );
   }
 
+  const sourceInfo = getSourceInfo();
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -272,7 +315,7 @@ const BookDetail: React.FC = () => {
               className="relative"
             >
               <img 
-                src={book.formats['image/jpeg'] || 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover'}
+                src={getCoverImage()}
                 alt={`Cover for ${book.title}`}
                 className="w-full max-w-xs object-cover rounded shadow-md border border-amber-200 dark:border-gray-700"
               />
@@ -322,6 +365,21 @@ const BookDetail: React.FC = () => {
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.3, duration: 0.5 }}
             >
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-1 text-xs bg-amber-100 dark:bg-gray-800 
+                  text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
+                  {sourceInfo.icon}
+                  <span>{sourceInfo.name}</span>
+                </div>
+                
+                {book.language && book.language.length > 0 && (
+                  <span className="text-xs bg-amber-100 dark:bg-gray-800 text-amber-800 
+                    dark:text-amber-300 px-2 py-1 rounded-full">
+                    {book.language[0].toUpperCase()}
+                  </span>
+                )}
+              </div>
+
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-serif font-bold text-amber-900 dark:text-amber-300">
                 {book.title}
               </h1>
@@ -346,16 +404,36 @@ const BookDetail: React.FC = () => {
                   {book.download_count.toLocaleString()} downloads
                 </span>
                 
-                {book.subjects.length > 0 && (
+                {book.publish_date && (
                   <span className="flex items-center mb-2">
                     <Calendar className="h-4 w-4 mr-1" />
-                    {book.subjects
-                      .filter(s => s.includes('Fiction') || s.includes('Non-Fiction'))
-                      .slice(0, 1)
-                      .map(s => s.split(' -- ')[0])[0] || 'Unknown Genre'}
+                    {book.publish_date}
                   </span>
                 )}
               </div>
+
+              {/* Publisher info */}
+              {book.publisher && book.publisher.length > 0 && (
+                <div className="mt-3">
+                  <span className="text-sm text-amber-700 dark:text-amber-500">
+                    Publisher: {book.publisher.join(', ')}
+                  </span>
+                </div>
+              )}
+
+              {/* Description */}
+              {book.description && (
+                <div className="mt-4">
+                  <h3 className="text-lg font-serif font-semibold text-amber-900 dark:text-amber-300 mb-2">
+                    Description
+                  </h3>
+                  <p className="text-amber-800 dark:text-amber-400 text-sm leading-relaxed">
+                    {book.description.length > 300 
+                      ? `${book.description.substring(0, 300)}...` 
+                      : book.description}
+                  </p>
+                </div>
+              )}
               
               <div className="mt-6">
                 <h2 className="text-lg font-serif font-semibold text-amber-900 dark:text-amber-300 mb-2">

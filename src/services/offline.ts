@@ -3,18 +3,28 @@ import { Book } from '../types';
 import { fetchBookContent } from './api';
 
 // Setup IndexedDB for offline reading
-const dbPromise = openDB('xbook-offline-db', 2, {
+const dbPromise = openDB('xbook-offline-db', 3, {
   upgrade(db, oldVersion) {
     // Create a store for offline books
     if (!db.objectStoreNames.contains('books')) {
       const booksStore = db.createObjectStore('books', { keyPath: 'id' });
       booksStore.createIndex('title', 'title');
       booksStore.createIndex('authors', 'authors', { multiEntry: true });
+      booksStore.createIndex('source', 'source');
     }
     
     // Create a store for book content
     if (!db.objectStoreNames.contains('content')) {
       db.createObjectStore('content', { keyPath: 'bookId' });
+    }
+
+    // Add source index if upgrading from version 2
+    if (oldVersion < 3) {
+      const transaction = db.transaction(['books'], 'readwrite');
+      const booksStore = transaction.objectStore('books');
+      if (!booksStore.indexNames.contains('source')) {
+        booksStore.createIndex('source', 'source');
+      }
     }
   },
 });
@@ -24,7 +34,7 @@ export const saveBookOffline = async (book: Book): Promise<void> => {
   try {
     const db = await dbPromise;
     
-    // Save book metadata
+    // Save book metadata with source information
     await db.put('books', {
       ...book,
       savedAt: new Date().toISOString(),
@@ -32,13 +42,14 @@ export const saveBookOffline = async (book: Book): Promise<void> => {
     
     // Try to fetch and save content
     try {
-      console.log(`Fetching content for offline storage: ${book.title}`);
+      console.log(`Fetching content for offline storage: ${book.title} (${book.source})`);
       const content = await fetchBookContent(book);
       
       await db.put('content', {
         bookId: book.id,
         content: content,
         fetchedAt: new Date().toISOString(),
+        source: book.source
       });
       
       console.log(`Successfully saved book "${book.title}" with content for offline reading`);
@@ -53,7 +64,7 @@ export const saveBookOffline = async (book: Book): Promise<void> => {
 };
 
 // Get a book from offline storage
-export const getOfflineBook = async (id: number): Promise<Book | undefined> => {
+export const getOfflineBook = async (id: number | string): Promise<Book | undefined> => {
   try {
     const db = await dbPromise;
     return await db.get('books', id);
@@ -64,7 +75,7 @@ export const getOfflineBook = async (id: number): Promise<Book | undefined> => {
 };
 
 // Get book content from offline storage
-export const getOfflineBookContent = async (id: number): Promise<string | null> => {
+export const getOfflineBookContent = async (id: number | string): Promise<string | null> => {
   try {
     const db = await dbPromise;
     const contentRecord = await db.get('content', id);
@@ -86,8 +97,20 @@ export const getAllOfflineBooks = async (): Promise<Book[]> => {
   }
 };
 
+// Get offline books by source
+export const getOfflineBooksBySource = async (source: 'gutenberg' | 'openlibrary' | 'archive'): Promise<Book[]> => {
+  try {
+    const db = await dbPromise;
+    const index = db.transaction('books').store.index('source');
+    return await index.getAll(source);
+  } catch (error) {
+    console.error('Error getting offline books by source:', error);
+    return [];
+  }
+};
+
 // Remove a book from offline storage
-export const removeOfflineBook = async (id: number): Promise<void> => {
+export const removeOfflineBook = async (id: number | string): Promise<void> => {
   try {
     const db = await dbPromise;
     const tx = db.transaction(['books', 'content'], 'readwrite');
@@ -107,7 +130,7 @@ export const removeOfflineBook = async (id: number): Promise<void> => {
 };
 
 // Check if a book is available offline
-export const isBookAvailableOffline = async (id: number): Promise<boolean> => {
+export const isBookAvailableOffline = async (id: number | string): Promise<boolean> => {
   try {
     const db = await dbPromise;
     const book = await db.get('books', id);
@@ -119,7 +142,7 @@ export const isBookAvailableOffline = async (id: number): Promise<boolean> => {
 };
 
 // Check if book content is available offline
-export const isBookContentAvailableOffline = async (id: number): Promise<boolean> => {
+export const isBookContentAvailableOffline = async (id: number | string): Promise<boolean> => {
   try {
     const db = await dbPromise;
     const content = await db.get('content', id);
@@ -135,6 +158,11 @@ export const getOfflineStorageStats = async (): Promise<{
   totalBooks: number;
   totalSize: number;
   booksWithContent: number;
+  bySource: {
+    gutenberg: number;
+    openlibrary: number;
+    archive: number;
+  };
 }> => {
   try {
     const db = await dbPromise;
@@ -145,11 +173,18 @@ export const getOfflineStorageStats = async (): Promise<{
     contents.forEach(content => {
       totalSize += content.content?.length || 0;
     });
+
+    const bySource = {
+      gutenberg: books.filter(book => book.source === 'gutenberg').length,
+      openlibrary: books.filter(book => book.source === 'openlibrary').length,
+      archive: books.filter(book => book.source === 'archive').length,
+    };
     
     return {
       totalBooks: books.length,
       totalSize,
       booksWithContent: contents.length,
+      bySource
     };
   } catch (error) {
     console.error('Error getting offline storage stats:', error);
@@ -157,6 +192,11 @@ export const getOfflineStorageStats = async (): Promise<{
       totalBooks: 0,
       totalSize: 0,
       booksWithContent: 0,
+      bySource: {
+        gutenberg: 0,
+        openlibrary: 0,
+        archive: 0
+      }
     };
   }
 };
@@ -175,5 +215,28 @@ export const clearOfflineStorage = async (): Promise<void> => {
   } catch (error) {
     console.error('Error clearing offline storage:', error);
     throw new Error('Failed to clear offline storage');
+  }
+};
+
+// Clear offline data by source
+export const clearOfflineStorageBySource = async (source: 'gutenberg' | 'openlibrary' | 'archive'): Promise<void> => {
+  try {
+    const db = await dbPromise;
+    const books = await getOfflineBooksBySource(source);
+    
+    const tx = db.transaction(['books', 'content'], 'readwrite');
+    const booksStore = tx.objectStore('books');
+    const contentStore = tx.objectStore('content');
+    
+    for (const book of books) {
+      await booksStore.delete(book.id);
+      await contentStore.delete(book.id);
+    }
+    
+    await tx.done;
+    console.log(`Cleared offline storage for source: ${source}`);
+  } catch (error) {
+    console.error('Error clearing offline storage by source:', error);
+    throw new Error(`Failed to clear offline storage for ${source}`);
   }
 };

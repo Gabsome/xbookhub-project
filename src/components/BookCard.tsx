@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Book, Bookmark, Download, Loader2 } from 'lucide-react';
+import { Book, Bookmark, Download, Loader2, Globe, Archive, Library } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Book as BookType } from '../types';
 import { saveBook } from '../services/api';
@@ -70,7 +70,47 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
   };
 
   // Get cover image or use a placeholder
-  const coverImage = book.formats['image/jpeg'] || 'https://placehold.co/200x300/e9d8b6/453a22?text=No+Cover';
+  const getCoverImage = () => {
+    if (book.formats['image/jpeg']) {
+      return book.formats['image/jpeg'];
+    }
+    
+    // For Open Library books, try to construct cover URL
+    if (book.source === 'openlibrary' && book.cover_id) {
+      return `https://covers.openlibrary.org/b/id/${book.cover_id}-L.jpg`;
+    }
+    
+    // Default placeholder
+    return 'https://placehold.co/200x300/e9d8b6/453a22?text=No+Cover';
+  };
+
+  // Get source icon
+  const getSourceIcon = () => {
+    switch (book.source) {
+      case 'gutenberg':
+        return <Globe className="h-3 w-3" />;
+      case 'openlibrary':
+        return <Library className="h-3 w-3" />;
+      case 'archive':
+        return <Archive className="h-3 w-3" />;
+      default:
+        return <Book className="h-3 w-3" />;
+    }
+  };
+
+  // Get source name
+  const getSourceName = () => {
+    switch (book.source) {
+      case 'gutenberg':
+        return 'Project Gutenberg';
+      case 'openlibrary':
+        return 'Open Library';
+      case 'archive':
+        return 'Internet Archive';
+      default:
+        return 'Unknown';
+    }
+  };
   
   return (
     <motion.div
@@ -81,7 +121,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
       <Link to={`/book/${book.id}`} className="block h-full">
         <div className="relative pb-[140%] overflow-hidden">
           <img 
-            src={coverImage}
+            src={getCoverImage()}
             alt={`Cover for ${book.title}`}
             className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 
               hover:scale-105"
@@ -91,6 +131,13 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
               target.src = 'https://placehold.co/200x300/e9d8b6/453a22?text=No+Cover';
             }}
           />
+          
+          {/* Source indicator */}
+          <div className="absolute top-2 left-2 flex items-center gap-1 text-xs bg-white/90 dark:bg-gray-900/90 
+            text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
+            {getSourceIcon()}
+            <span className="hidden sm:inline">{getSourceName()}</span>
+          </div>
         </div>
         
         <div className="p-4">
@@ -101,6 +148,13 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
           <p className="mt-2 text-sm text-amber-800 dark:text-amber-400 italic line-clamp-1">
             {book.authors.map(author => author.name).join(', ')}
           </p>
+          
+          {/* Publication info */}
+          {book.publish_date && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">
+              Published: {book.publish_date}
+            </p>
+          )}
           
           <div className="mt-3 flex flex-wrap gap-1">
             {book.subjects.slice(0, 2).map((subject, index) => (
@@ -151,7 +205,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
         </motion.button>
       </div>
       
-      {/* Book count indicator */}
+      {/* Download count indicator */}
       <div className="absolute bottom-2 right-2 flex items-center gap-1 text-xs bg-amber-100 
         dark:bg-gray-700 text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
         <Book className="h-3 w-3" />

@@ -2,18 +2,20 @@
 
 ## Overview
 
-Xbook-Hub integrates with several APIs to provide a comprehensive book reading experience. This document outlines all API integrations, endpoints, and usage patterns.
+Xbook-Hub integrates with multiple APIs to provide a comprehensive book reading experience. This document outlines all API integrations, endpoints, and usage patterns for accessing books from Project Gutenberg, Open Library, and Internet Archive.
 
 ## Table of Contents
 
 1. [Project Gutenberg API](#project-gutenberg-api)
-2. [Proxy Server API](#proxy-server-api)
-3. [Uploadcare API](#uploadcare-api)
-4. [Local Storage API](#local-storage-api)
-5. [IndexedDB API](#indexeddb-api)
-6. [Error Handling](#error-handling)
-7. [Rate Limiting](#rate-limiting)
-8. [Authentication](#authentication)
+2. [Open Library API](#open-library-api)
+3. [Internet Archive API](#internet-archive-api)
+4. [Proxy Server API](#proxy-server-api)
+5. [Uploadcare API](#uploadcare-api)
+6. [Local Storage API](#local-storage-api)
+7. [IndexedDB API](#indexeddb-api)
+8. [Error Handling](#error-handling)
+9. [Rate Limiting](#rate-limiting)
+10. [Authentication](#authentication)
 
 ## Project Gutenberg API
 
@@ -25,7 +27,7 @@ https://gutendex.com
 ### Endpoints
 
 #### Get Books
-Retrieve a paginated list of books.
+Retrieve a paginated list of books from Project Gutenberg.
 
 ```http
 GET /books?page={page}&search={query}
@@ -60,71 +62,189 @@ GET /books?page={page}&search={query}
         "text/plain": "https://www.gutenberg.org/files/1/1-0.txt",
         "image/jpeg": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg"
       },
-      "download_count": 12345
+      "download_count": 12345,
+      "source": "gutenberg"
     }
   ]
 }
 ```
 
-#### Get Book by ID
-Retrieve detailed information about a specific book.
+## Open Library API
+
+### Base URL
+```
+https://openlibrary.org
+```
+
+### Endpoints
+
+#### Search Books
+Search for books in the Open Library database.
 
 ```http
-GET /books/{id}
+GET /search.json?q={query}&has_fulltext=true&limit={limit}&offset={offset}
 ```
 
 **Parameters:**
-- `id`: Unique identifier for the book
+- `q`: Search query
+- `has_fulltext`: Filter for books with full text available
+- `limit`: Number of results per page (default: 20)
+- `offset`: Pagination offset
 
 **Response:**
 ```json
 {
-  "id": 1,
-  "title": "The Declaration of Independence of the United States of America",
-  "authors": [
+  "numFound": 1000,
+  "start": 0,
+  "docs": [
     {
-      "name": "Jefferson, Thomas",
-      "birth_year": 1743,
-      "death_year": 1826
+      "key": "/works/OL123456W",
+      "title": "Example Book",
+      "author_name": ["Author Name"],
+      "first_publish_year": 1900,
+      "cover_i": 123456,
+      "ia": ["examplebook00auth"],
+      "subject": ["Fiction", "Literature"],
+      "isbn": ["1234567890"],
+      "publisher": ["Example Publisher"],
+      "language": ["eng"]
     }
-  ],
-  "subjects": [
-    "United States -- History -- Revolution, 1775-1783 -- Sources"
-  ],
-  "formats": {
-    "text/html": "https://www.gutenberg.org/files/1/1-h/1-h.htm",
-    "text/plain": "https://www.gutenberg.org/files/1/1-0.txt",
-    "image/jpeg": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg"
-  },
-  "download_count": 12345
+  ]
 }
 ```
 
-### Usage Examples
+#### Get Work Details
+Retrieve detailed information about a specific work.
 
-#### Fetch Books
-```typescript
-const fetchBooks = async (page = 1): Promise<BooksApiResponse> => {
-  const response = await fetch(`https://gutendex.com/books?page=${page}`);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-  return await response.json();
-};
+```http
+GET /works/{work_id}.json
 ```
 
-#### Search Books
-```typescript
-const searchBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
-  const response = await fetch(
-    `https://gutendex.com/books?search=${encodeURIComponent(query)}&page=${page}`
-  );
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-  return await response.json();
-};
+**Response:**
+```json
+{
+  "key": "/works/OL123456W",
+  "title": "Example Book",
+  "authors": [
+    {
+      "author": {
+        "key": "/authors/OL123456A"
+      }
+    }
+  ],
+  "subjects": ["Fiction", "Literature"],
+  "description": "Book description...",
+  "covers": [123456],
+  "first_publish_date": "1900"
+}
 ```
+
+#### Get Author Details
+Retrieve information about an author.
+
+```http
+GET /authors/{author_id}.json
+```
+
+**Response:**
+```json
+{
+  "key": "/authors/OL123456A",
+  "name": "Author Name",
+  "birth_date": "1850",
+  "death_date": "1920"
+}
+```
+
+## Internet Archive API
+
+### Base URL
+```
+https://archive.org
+```
+
+### Endpoints
+
+#### Advanced Search
+Search for books and texts in the Internet Archive.
+
+```http
+GET /advancedsearch.php?q={query}&fl={fields}&sort={sort}&rows={rows}&page={page}&output=json
+```
+
+**Parameters:**
+- `q`: Search query with filters (e.g., `collection:opensource AND mediatype:texts`)
+- `fl`: Fields to return (comma-separated)
+- `sort`: Sort order (e.g., `downloads desc`)
+- `rows`: Number of results per page
+- `page`: Page number
+- `output`: Response format (json)
+
+**Response:**
+```json
+{
+  "response": {
+    "numFound": 5000,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "examplebook",
+        "title": "Example Book",
+        "creator": "Author Name",
+        "subject": ["Fiction", "Literature"],
+        "description": "Book description...",
+        "date": "1900",
+        "publisher": "Example Publisher",
+        "language": "English",
+        "downloads": 1000
+      }
+    ]
+  }
+}
+```
+
+#### Get Item Metadata
+Retrieve detailed metadata for a specific item.
+
+```http
+GET /metadata/{identifier}
+```
+
+**Response:**
+```json
+{
+  "metadata": {
+    "identifier": "examplebook",
+    "title": "Example Book",
+    "creator": "Author Name",
+    "subject": ["Fiction", "Literature"],
+    "description": "Book description...",
+    "date": "1900",
+    "publisher": "Example Publisher",
+    "language": "English"
+  },
+  "files": [
+    {
+      "name": "examplebook.pdf",
+      "format": "PDF",
+      "size": "1234567"
+    }
+  ]
+}
+```
+
+#### Access Book Content
+Access readable content from Internet Archive books.
+
+```http
+GET /stream/{identifier}/{filename}
+GET /download/{identifier}/{filename}
+```
+
+**Common file formats:**
+- `{identifier}.pdf` - PDF version
+- `{identifier}_djvu.txt` - Plain text extracted from DjVu
+- `{identifier}.txt` - Plain text version
 
 ## Proxy Server API
 
@@ -134,7 +254,7 @@ https://xbookhub-project.onrender.com/api
 ```
 
 ### Purpose
-The proxy server handles CORS issues when fetching book content from Project Gutenberg.
+The proxy server handles CORS issues when fetching book content from various sources and provides additional API endpoints.
 
 ### Endpoints
 
@@ -146,17 +266,32 @@ GET /fetch-book?url={encoded_url}
 ```
 
 **Parameters:**
-- `url`: URL-encoded book content URL from Project Gutenberg
+- `url`: URL-encoded book content URL from any supported source
 
 **Headers:**
 ```http
 Content-Type: text/html; charset=utf-8
 Cache-Control: public, max-age=3600
 X-Content-Length: 123456
+X-Source-URL: original_url
 ```
 
 **Response:**
-Raw book content (HTML or plain text)
+Raw book content (HTML, plain text, or PDF)
+
+#### Open Library Proxy
+Proxy requests to Open Library API to handle CORS.
+
+```http
+GET /openlibrary/{path}
+```
+
+#### Internet Archive Proxy
+Proxy requests to Internet Archive API to handle CORS.
+
+```http
+GET /archive/{path}
+```
 
 #### Health Check
 Check the status of the proxy server.
@@ -169,238 +304,102 @@ GET /health
 ```json
 {
   "status": "ok",
-  "timestamp": "2024-12-07T10:30:00.000Z"
+  "timestamp": "2024-12-07T10:30:00.000Z",
+  "services": ["Project Gutenberg", "Open Library", "Internet Archive"]
 }
 ```
 
-### Usage Examples
+## Combined API Usage
 
-#### Fetch Book Content
+### Fetch Books from All Sources
+```typescript
+const fetchBooks = async (page = 1): Promise<BooksApiResponse> => {
+  // Fetch from all sources and combine results
+  const [gutenbergBooks, openLibraryBooks, archiveBooks] = await Promise.allSettled([
+    fetchGutenbergBooks(page),
+    fetchOpenLibraryBooks(page),
+    fetchArchiveBooks(page)
+  ]);
+
+  const allBooks: Book[] = [];
+  // Combine and shuffle results for variety
+  // Return combined response
+};
+```
+
+### Search Across All Sources
+```typescript
+const searchBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
+  // Search all sources simultaneously
+  const [gutenbergResults, openLibraryResults, archiveResults] = await Promise.allSettled([
+    searchGutenbergBooks(query, page),
+    searchOpenLibraryBooks(query, page),
+    searchArchiveBooks(query, page)
+  ]);
+
+  // Combine and sort by relevance
+  // Return sorted results
+};
+```
+
+### Fetch Book by ID
+```typescript
+const fetchBookById = async (id: number | string): Promise<Book> => {
+  // Determine source based on ID format
+  if (typeof id === 'number' || /^\d+$/.test(id.toString())) {
+    // Try Gutenberg first for numeric IDs
+  } else if (id.toString().startsWith('/works/') || id.toString().startsWith('OL')) {
+    // Try Open Library for work IDs
+  } else {
+    // Try Internet Archive for other identifiers
+  }
+};
+```
+
+## Content Fetching
+
+### Multi-Source Content Fetching
 ```typescript
 const fetchBookContent = async (book: Book): Promise<string> => {
-  const contentUrl = book.formats['text/html'] || book.formats['text/plain'];
-  const proxyUrl = `https://xbookhub-project.onrender.com/api/fetch-book?url=${encodeURIComponent(contentUrl)}`;
-  
-  const response = await fetch(proxyUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch content: ${response.statusText}`);
-  }
-  
-  return await response.text();
-};
-```
+  const contentFormats: string[] = [];
 
-### Error Responses
-
-#### 400 Bad Request
-```json
-{
-  "error": "Missing URL parameter",
-  "message": "Please provide a URL to fetch content from"
-}
-```
-
-#### 408 Request Timeout
-```json
-{
-  "error": "Request timeout",
-  "message": "The request took too long to complete. Please try again.",
-  "url": "https://example.com/book.txt"
-}
-```
-
-#### 500 Internal Server Error
-```json
-{
-  "error": "Internal server error",
-  "message": "An unexpected error occurred while fetching the content",
-  "url": "https://example.com/book.txt"
-}
-```
-
-## Uploadcare API
-
-### Configuration
-```javascript
-window.UPLOADCARE_PUBLIC_KEY = 'cb2ddbdec0cd01373ea6';
-```
-
-### Widget Integration
-
-#### Initialize Widget
-```typescript
-import { Widget } from 'uploadcare-widget';
-
-const createUploadcareWidget = (element: HTMLElement, options = {}) => {
-  return Widget(element, {
-    publicKey: 'cb2ddbdec0cd01373ea6',
-    imagesOnly: true,
-    previewStep: true,
-    ...options,
-  });
-};
-```
-
-#### Upload File
-```typescript
-const uploadFile = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const widget = Widget.create({
-      publicKey: 'cb2ddbdec0cd01373ea6',
-      imagesOnly: true,
-      previewStep: true,
-    });
-
-    widget.value(file).then(
-      (fileInfo) => {
-        resolve(fileInfo.cdnUrl);
-      },
-      (error) => {
-        reject(error);
+  // Determine content URLs based on source
+  switch (book.source) {
+    case 'gutenberg':
+      contentFormats.push(
+        book.formats['text/html'],
+        book.formats['text/plain']
+      );
+      break;
+    case 'openlibrary':
+    case 'archive':
+      if (book.ia_identifier) {
+        contentFormats.push(
+          `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`,
+          `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.txt`
+        );
       }
-    );
-  });
-};
-```
+      break;
+  }
 
-### Response Format
-```json
-{
-  "uuid": "12345678-1234-1234-1234-123456789012",
-  "name": "avatar.jpg",
-  "size": 123456,
-  "isStored": true,
-  "isImage": true,
-  "cdnUrl": "https://ucarecdn.com/12345678-1234-1234-1234-123456789012/",
-  "originalUrl": "https://ucarecdn.com/12345678-1234-1234-1234-123456789012/avatar.jpg"
-}
-```
+  // Try each format with fallback options
+  for (const contentUrl of contentFormats.filter(Boolean)) {
+    try {
+      const proxyUrl = `${PROXY_URL}?url=${encodeURIComponent(contentUrl)}`;
+      const response = await fetch(proxyUrl);
+      if (response.ok) {
+        const content = await response.text();
+        if (content && content.trim().length > 0) {
+          return content;
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch from ${contentUrl}:`, error);
+      continue;
+    }
+  }
 
-## Local Storage API
-
-### User Data Management
-
-#### Save User Data
-```typescript
-const saveUserData = (userId: string, data: any): void => {
-  localStorage.setItem(`xbook-user-${userId}`, JSON.stringify(data));
-};
-```
-
-#### Get User Data
-```typescript
-const getUserData = (userId: string): any => {
-  const data = localStorage.getItem(`xbook-user-${userId}`);
-  return data ? JSON.parse(data) : null;
-};
-```
-
-### Saved Books Management
-
-#### Save Book
-```typescript
-const saveBook = (book: Book, userId: string): void => {
-  const savedBooks = getSavedBooks(userId);
-  const bookToSave = {
-    ...book,
-    savedAt: new Date().toISOString(),
-  };
-  const updatedBooks = [...savedBooks, bookToSave];
-  localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify(updatedBooks));
-};
-```
-
-#### Get Saved Books
-```typescript
-const getSavedBooks = (userId: string): SavedBook[] => {
-  const saved = localStorage.getItem(`xbook-saved-${userId}`);
-  return saved ? JSON.parse(saved) : [];
-};
-```
-
-### Settings Management
-
-#### Save Settings
-```typescript
-const saveSettings = (settings: UserSettings): void => {
-  localStorage.setItem('xbook-settings', JSON.stringify(settings));
-};
-```
-
-#### Get Settings
-```typescript
-const getSettings = (): UserSettings => {
-  const settings = localStorage.getItem('xbook-settings');
-  return settings ? JSON.parse(settings) : {
-    theme: 'vintage',
-    fontSize: 'medium'
-  };
-};
-```
-
-## IndexedDB API
-
-### Database Schema
-
-#### Database: xbook-offline-db (version 2)
-
-**Object Stores:**
-1. `books` - Stores book metadata
-   - Key path: `id`
-   - Indexes: `title`, `authors`
-
-2. `content` - Stores book content
-   - Key path: `bookId`
-
-### Operations
-
-#### Save Book Offline
-```typescript
-const saveBookOffline = async (book: Book): Promise<void> => {
-  const db = await openDB('xbook-offline-db', 2);
-  
-  // Save book metadata
-  await db.put('books', {
-    ...book,
-    savedAt: new Date().toISOString(),
-  });
-  
-  // Fetch and save content
-  const content = await fetchBookContent(book);
-  await db.put('content', {
-    bookId: book.id,
-    content: content,
-    fetchedAt: new Date().toISOString(),
-  });
-};
-```
-
-#### Get Offline Book
-```typescript
-const getOfflineBook = async (id: number): Promise<Book | undefined> => {
-  const db = await openDB('xbook-offline-db', 2);
-  return await db.get('books', id);
-};
-```
-
-#### Get All Offline Books
-```typescript
-const getAllOfflineBooks = async (): Promise<Book[]> => {
-  const db = await openDB('xbook-offline-db', 2);
-  return await db.getAll('books');
-};
-```
-
-#### Remove Offline Book
-```typescript
-const removeOfflineBook = async (id: number): Promise<void> => {
-  const db = await openDB('xbook-offline-db', 2);
-  const tx = db.transaction(['books', 'content'], 'readwrite');
-  
-  await tx.objectStore('books').delete(id);
-  await tx.objectStore('content').delete(id);
-  
-  await tx.done;
+  throw new Error('Failed to fetch book content from any available source.');
 };
 ```
 
@@ -414,196 +413,147 @@ interface NetworkError extends Error {
   code: 'NETWORK_ERROR';
   status?: number;
   statusText?: string;
+  source?: string;
 }
 ```
 
-#### Timeout Errors
+#### Source-Specific Errors
 ```typescript
-interface TimeoutError extends Error {
-  code: 'TIMEOUT_ERROR';
-  timeout: number;
-}
-```
-
-#### Content Errors
-```typescript
-interface ContentError extends Error {
-  code: 'CONTENT_ERROR';
-  contentType?: string;
+interface SourceError extends Error {
+  code: 'SOURCE_ERROR';
+  source: 'gutenberg' | 'openlibrary' | 'archive';
+  originalError: Error;
 }
 ```
 
 ### Error Handling Patterns
 
-#### Retry Logic
-```typescript
-const fetchWithRetry = async (url: string, retries = 3): Promise<Response> => {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return response;
-      
-      if (response.status >= 500 && i < retries - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        continue;
-      }
-      
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    } catch (error) {
-      if (i === retries - 1) throw error;
-      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-    }
-  }
-  throw new Error('Max retries exceeded');
-};
-```
-
 #### Graceful Degradation
 ```typescript
-const fetchBookContent = async (book: Book): Promise<string> => {
-  const contentFormats = [
-    book.formats['text/html'],
-    book.formats['text/plain'],
-  ].filter(Boolean);
+const fetchBooksWithFallback = async (page = 1): Promise<BooksApiResponse> => {
+  const results = await Promise.allSettled([
+    fetchGutenbergBooks(page),
+    fetchOpenLibraryBooks(page),
+    fetchArchiveBooks(page)
+  ]);
 
-  for (const contentUrl of contentFormats) {
-    try {
-      const content = await fetchWithRetry(contentUrl);
-      if (content) return content;
-    } catch (error) {
-      console.warn(`Failed to fetch from ${contentUrl}:`, error);
-      continue;
-    }
+  const successfulResults = results
+    .filter(result => result.status === 'fulfilled')
+    .map(result => result.value);
+
+  if (successfulResults.length === 0) {
+    throw new Error('All book sources are currently unavailable');
   }
-  
-  throw new Error('No content available');
+
+  // Combine successful results
+  return combineBookResults(successfulResults);
 };
 ```
 
 ## Rate Limiting
 
 ### Client-Side Rate Limiting
-
-#### Request Queue
 ```typescript
-class RequestQueue {
-  private queue: Array<() => Promise<any>> = [];
-  private processing = false;
-  private delay = 100; // ms between requests
+class MultiSourceRequestQueue {
+  private queues = {
+    gutenberg: new RequestQueue(100), // 100ms delay
+    openlibrary: new RequestQueue(200), // 200ms delay
+    archive: new RequestQueue(300) // 300ms delay
+  };
 
-  async add<T>(request: () => Promise<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      this.queue.push(async () => {
-        try {
-          const result = await request();
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      });
-      
-      this.process();
-    });
-  }
-
-  private async process(): Promise<void> {
-    if (this.processing || this.queue.length === 0) return;
-    
-    this.processing = true;
-    
-    while (this.queue.length > 0) {
-      const request = this.queue.shift()!;
-      await request();
-      await new Promise(resolve => setTimeout(resolve, this.delay));
-    }
-    
-    this.processing = false;
+  async add<T>(source: string, request: () => Promise<T>): Promise<T> {
+    const queue = this.queues[source] || this.queues.gutenberg;
+    return queue.add(request);
   }
 }
 ```
 
 ### Server-Side Rate Limiting
+The proxy server implements different rate limits for each source:
+- **Project Gutenberg**: 60 requests/minute
+- **Open Library**: 100 requests/minute  
+- **Internet Archive**: 30 requests/minute
 
-The proxy server implements rate limiting:
+## Data Models
 
-- **Requests per minute**: 60
-- **Burst limit**: 10
-- **Timeout**: 15 seconds per request
-
-## Authentication
-
-### User Authentication
-
-#### Login
+### Unified Book Model
 ```typescript
-const login = async (email: string, password: string): Promise<User> => {
-  // Mock authentication for demo
-  const mockUser: User = {
-    id: 'user-123',
-    name: 'Demo User',
-    email,
-    preferredTheme: 'vintage',
+interface Book {
+  id: number | string;
+  title: string;
+  authors: Author[];
+  subjects: string[];
+  formats: {
+    'image/jpeg'?: string;
+    'text/html'?: string;
+    'text/plain'?: string;
+    'application/pdf'?: string;
+    'application/epub+zip'?: string;
   };
-  
-  localStorage.setItem('xbook-user', JSON.stringify(mockUser));
-  return mockUser;
-};
+  download_count: number;
+  source: 'gutenberg' | 'openlibrary' | 'archive';
+  isbn?: string[];
+  publish_date?: string;
+  publisher?: string[];
+  description?: string;
+  cover_id?: number;
+  ia_identifier?: string;
+  language?: string[];
+}
 ```
 
-#### Check Authentication
+### Source-Specific Conversions
 ```typescript
-const checkAuth = (): User | null => {
-  const storedUser = localStorage.getItem('xbook-user');
-  return storedUser ? JSON.parse(storedUser) : null;
+// Convert Open Library search result to unified Book model
+const convertOpenLibraryToBook = async (doc: any): Promise<Book> => {
+  return {
+    id: doc.key || `ol_${doc.cover_edition_key}`,
+    title: doc.title,
+    authors: doc.author_name?.map(name => ({ name })) || [],
+    subjects: doc.subject || [],
+    source: 'openlibrary',
+    // ... other fields
+  };
 };
-```
 
-#### Logout
-```typescript
-const logout = (): void => {
-  localStorage.removeItem('xbook-user');
+// Convert Internet Archive item to unified Book model
+const convertArchiveToBook = async (doc: ArchiveItem): Promise<Book> => {
+  return {
+    id: doc.identifier,
+    title: doc.title,
+    authors: Array.isArray(doc.creator) 
+      ? doc.creator.map(name => ({ name }))
+      : [{ name: doc.creator || 'Unknown Author' }],
+    source: 'archive',
+    // ... other fields
+  };
 };
-```
-
-### API Key Management
-
-#### Uploadcare
-```typescript
-// Public key (safe for client-side use)
-const UPLOADCARE_PUBLIC_KEY = 'cb2ddbdec0cd01373ea6';
-
-// Initialize widget with public key
-const widget = Widget.create({
-  publicKey: UPLOADCARE_PUBLIC_KEY,
-  // ... other options
-});
 ```
 
 ## Best Practices
 
 ### Performance Optimization
+1. **Parallel Requests**: Fetch from multiple sources simultaneously
+2. **Caching**: Cache responses for frequently accessed books
+3. **Lazy Loading**: Load book details on demand
+4. **Image Optimization**: Use appropriate image sizes for covers
 
-1. **Caching**: Implement proper caching strategies
-2. **Pagination**: Use pagination for large datasets
-3. **Lazy Loading**: Load content on demand
-4. **Compression**: Use gzip compression for text content
+### Error Recovery
+1. **Retry Logic**: Implement exponential backoff for failed requests
+2. **Fallback Sources**: Try alternative sources when primary fails
+3. **Partial Results**: Show available results even if some sources fail
+4. **User Feedback**: Provide clear error messages and recovery options
 
 ### Security
-
-1. **Input Validation**: Validate all user inputs
-2. **HTTPS**: Use HTTPS for all communications
-3. **CORS**: Properly configure CORS headers
-4. **Rate Limiting**: Implement rate limiting to prevent abuse
-
-### Error Handling
-
-1. **Graceful Degradation**: Provide fallbacks for failed requests
-2. **User Feedback**: Show meaningful error messages to users
-3. **Logging**: Log errors for debugging and monitoring
-4. **Retry Logic**: Implement intelligent retry mechanisms
+1. **Input Validation**: Validate all search queries and IDs
+2. **Rate Limiting**: Respect API rate limits for all sources
+3. **CORS Handling**: Use proxy server for cross-origin requests
+4. **Content Filtering**: Validate content types and sizes
 
 ---
 
 **Last Updated**: December 2024  
-**Version**: 1.0  
+**Version**: 2.0  
 **Contact**: api@xbook-hub.com
+
+This documentation covers the integration of Project Gutenberg, Open Library, and Internet Archive APIs to provide a comprehensive book reading experience across multiple sources.
