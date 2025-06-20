@@ -1,12 +1,13 @@
-import { BooksApiResponse, Book, OpenLibraryWork, OpenLibraryAuthor, OpenLibraryEdition, ArchiveSearchResponse, ArchiveItem } from '../types';
+import { BooksApiResponse, Book, OpenLibraryWork, OpenLibraryAuthor, ArchiveSearchResponse, ArchiveItem } from '../types'; // Removed OpenLibraryEdition
 
-// Your backend proxy endpoint that handles external API calls
-const BACKEND_PROXY_URL = 'https://xbookhub-project.onrender.com/api/fetch-book';
+// Your backend proxy endpoint that handles content fetching
+const BACKEND_CONTENT_PROXY_URL = 'https://xbookhub-project.onrender.com/api/fetch-book';
+// Your backend base URL for specific endpoints like covers and proxied metadata
+const BACKEND_BASE_URL = 'https://xbookhub-project.onrender.com';
 
-// External API base URLs (used to construct the URL passed to your proxy)
+// External API base URLs (used to construct the URL passed to your content proxy)
 const GUTENBERG_EXTERNAL_BASE = 'https://gutendex.com';
-const OPENLIBRARY_EXTERNAL_BASE = 'https://openlibrary.org';
-const ARCHIVE_EXTERNAL_BASE = 'https://archive.org';
+// Removed OPENLIBRARY_EXTERNAL_BASE and ARCHIVE_EXTERNAL_BASE as they are no longer directly used for constructing URLs in this file
 
 // Enhanced fetch with retry logic and better error handling
 const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 3): Promise<Response> => {
@@ -15,14 +16,33 @@ const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased timeout to 20 seconds for proxy/external calls
 
+            // Fix for Error 7053: Safely merge headers
+            const defaultHeaders: Record<string, string> = {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)',
+            };
+
+            let combinedHeaders: HeadersInit = { ...defaultHeaders };
+
+            if (options.headers) {
+                if (Array.isArray(options.headers)) {
+                    combinedHeaders = [...Object.entries(defaultHeaders), ...options.headers];
+                } else if (options.headers instanceof Headers) {
+                    combinedHeaders = options.headers; // Use the Headers object directly if provided
+                    for (const [key, value] of Object.entries(defaultHeaders)) {
+                        if (!combinedHeaders.has(key)) {
+                            (combinedHeaders as Headers).set(key, value);
+                        }
+                    }
+                } else { // Assume it's a plain object (Record<string, string>)
+                    combinedHeaders = { ...defaultHeaders, ...options.headers as Record<string, string> };
+                }
+            }
+
             const response = await fetch(url, {
                 ...options,
                 signal: controller.signal,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)',
-                    ...options.headers,
-                },
+                headers: combinedHeaders, // Use the combinedHeaders
             });
 
             clearTimeout(timeoutId);
@@ -50,16 +70,16 @@ const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 
     throw new Error('Max retries exceeded');
 };
 
-// Helper function to route requests through the backend proxy
-const fetchViaProxy = async (externalUrl: string, options: RequestInit = {}): Promise<Response> => {
-    const proxyRequestUrl = `${BACKEND_PROXY_URL}?url=${encodeURIComponent(externalUrl)}`;
+// Helper function to route content requests through the backend content proxy
+const fetchContentViaProxy = async (externalUrl: string, options: RequestInit = {}): Promise<Response> => {
+    const proxyRequestUrl = `${BACKEND_CONTENT_PROXY_URL}?url=${encodeURIComponent(externalUrl)}`;
     return fetchWithRetry(proxyRequestUrl, options);
 };
 
 // Project Gutenberg API functions
 export const fetchGutenbergBooks = async (page = 1): Promise<BooksApiResponse> => {
     try {
-        const response = await fetchViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?page=${page}`);
+        const response = await fetchContentViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?page=${page}`);
         const data = await response.json();
         return {
             ...data,
@@ -77,7 +97,7 @@ export const fetchGutenbergBooks = async (page = 1): Promise<BooksApiResponse> =
 
 export const searchGutenbergBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
     try {
-        const response = await fetchViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}&page=${page}`);
+        const response = await fetchContentViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}&page=${page}`);
         const data = await response.json();
         return {
             ...data,
@@ -97,8 +117,9 @@ export const searchGutenbergBooks = async (query: string, page = 1): Promise<Boo
 export const fetchOpenLibraryBooks = async (page = 1, limit = 20): Promise<BooksApiResponse> => {
     try {
         const offset = (page - 1) * limit;
-        const response = await fetchViaProxy(
-            `${OPENLIBRARY_EXTERNAL_BASE}/search.json?q=*&has_fulltext=true&limit=${limit}&offset=${offset}&sort=downloads desc`
+        // Use BACKEND_BASE_URL for Open Library metadata proxy, not fetch-book
+        const response = await fetchWithRetry(
+            `${BACKEND_BASE_URL}/api/openlibrary/search.json?q=*&has_fulltext=true&limit=${limit}&offset=${offset}&sort=downloads desc`
         );
         const data = await response.json();
 
@@ -122,8 +143,9 @@ export const fetchOpenLibraryBooks = async (page = 1, limit = 20): Promise<Books
 export const searchOpenLibraryBooks = async (query: string, page = 1, limit = 20): Promise<BooksApiResponse> => {
     try {
         const offset = (page - 1) * limit;
-        const response = await fetchViaProxy(
-            `${OPENLIBRARY_EXTERNAL_BASE}/search.json?q=${encodeURIComponent(query)}&has_fulltext=true&limit=${limit}&offset=${offset}&sort=downloads desc`
+        // Use BACKEND_BASE_URL for Open Library metadata proxy
+        const response = await fetchWithRetry(
+            `${BACKEND_BASE_URL}/api/openlibrary/search.json?q=${encodeURIComponent(query)}&has_fulltext=true&limit=${limit}&offset=${offset}&sort=downloads desc`
         );
         const data = await response.json();
 
@@ -147,8 +169,9 @@ export const searchOpenLibraryBooks = async (query: string, page = 1, limit = 20
 // Internet Archive API functions
 export const fetchArchiveBooks = async (page = 1, limit = 20): Promise<BooksApiResponse> => {
     try {
-        const response = await fetchViaProxy(
-            `${ARCHIVE_EXTERNAL_BASE}/advancedsearch.php?q=collection:opensource AND mediatype:texts AND format:pdf&fl=identifier,title,creator,subject,description,date,publisher,language,downloads&sort[]=downloads desc&rows=${limit}&page=${page}&output=json`
+        // Use BACKEND_BASE_URL for Internet Archive metadata proxy
+        const response = await fetchWithRetry(
+            `${BACKEND_BASE_URL}/api/archive/advancedsearch.php?q=collection:opensource AND mediatype:texts AND format:pdf&fl=identifier,title,creator,subject,description,date,publisher,language,downloads&sort[]=downloads desc&rows=${limit}&page=${page}&output=json`
         );
         const data: ArchiveSearchResponse = await response.json();
 
@@ -171,8 +194,9 @@ export const fetchArchiveBooks = async (page = 1, limit = 20): Promise<BooksApiR
 
 export const searchArchiveBooks = async (query: string, page = 1, limit = 20): Promise<BooksApiResponse> => {
     try {
-        const response = await fetchViaProxy(
-            `${ARCHIVE_EXTERNAL_BASE}/advancedsearch.php?q=${encodeURIComponent(query)} AND collection:opensource AND mediatype:texts&fl=identifier,title,creator,subject,description,date,publisher,language,downloads&sort[]=downloads desc&rows=${limit}&page=${page}&output=json`
+        // Use BACKEND_BASE_URL for Internet Archive metadata proxy
+        const response = await fetchWithRetry(
+            `${BACKEND_BASE_URL}/api/archive/advancedsearch.php?q=${encodeURIComponent(query)} AND collection:opensource AND mediatype:texts&fl=identifier,title,creator,subject,description,date,publisher,language,downloads&sort[]=downloads desc&rows=${limit}&page=${page}&output=json`
         );
         const data: ArchiveSearchResponse = await response.json();
 
@@ -286,7 +310,7 @@ export const fetchBookById = async (id: number | string): Promise<Book> => {
         // Determine source based on ID format and try fetching via proxy
         if (typeof id === 'number' || /^\d+$/.test(id.toString())) {
             try {
-                const response = await fetchViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books/${id}`);
+                const response = await fetchContentViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books/${id}`);
                 const book = await response.json();
                 return { ...book, source: 'gutenberg' };
             } catch (error) {
@@ -296,7 +320,8 @@ export const fetchBookById = async (id: number | string): Promise<Book> => {
 
         if (id.toString().startsWith('/works/') || id.toString().startsWith('OL')) {
             try {
-                const response = await fetchViaProxy(`${OPENLIBRARY_EXTERNAL_BASE}${id.toString().startsWith('/') ? id : `/works/${id}`}.json`);
+                // Use BACKEND_BASE_URL for Open Library metadata proxy
+                const response = await fetchWithRetry(`${BACKEND_BASE_URL}/api/openlibrary${id.toString().startsWith('/') ? id : `/works/${id}`}.json`);
                 const work = await response.json();
                 return await convertOpenLibraryWorkToBook(work);
             } catch (error) {
@@ -305,7 +330,8 @@ export const fetchBookById = async (id: number | string): Promise<Book> => {
         }
 
         try {
-            const response = await fetchViaProxy(`${ARCHIVE_EXTERNAL_BASE}/metadata/${id}`);
+            // Use BACKEND_BASE_URL for Internet Archive metadata proxy
+            const response = await fetchWithRetry(`${BACKEND_BASE_URL}/api/archive/metadata/${id}`);
             const metadata = await response.json();
             return await convertArchiveMetadataToBook(metadata);
         } catch (error) {
@@ -327,7 +353,7 @@ const convertOpenLibraryToBook = async (doc: any): Promise<Book | null> => {
             title: doc.title || 'Unknown Title',
             authors: doc.author_name ? doc.author_name.map((name: string) => ({ name })) : [{ name: 'Unknown Author' }],
             subjects: doc.subject || [],
-            formats: {},
+            formats: {}, // Initialize formats as empty, images will be handled by dedicated endpoint
             download_count: doc.readinglog_count || 0,
             source: 'openlibrary',
             isbn: [...(doc.isbn || []), ...(doc.isbn_13 || [])],
@@ -336,12 +362,15 @@ const convertOpenLibraryToBook = async (doc: any): Promise<Book | null> => {
             language: doc.language || ['en']
         };
 
+        // If Open Library provides a cover ID, store the *external* URL here.
+        // This is for metadata, not direct image loading in <img> src.
         if (doc.cover_i) {
             book.formats['image/jpeg'] = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
         }
 
         if (doc.ia) {
             book.ia_identifier = Array.isArray(doc.ia) ? doc.ia[0] : doc.ia;
+            // These are also external URLs, used for fetching content, not covers
             book.formats['text/html'] = `https://archive.org/stream/${book.ia_identifier}`;
             book.formats['application/pdf'] = `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.pdf`;
         }
@@ -360,7 +389,7 @@ const convertOpenLibraryWorkToBook = async (work: OpenLibraryWork): Promise<Book
         title: work.title || 'Unknown Title',
         authors: [],
         subjects: work.subjects || [],
-        formats: {},
+        formats: {}, // Initialize formats as empty, images will be handled by dedicated endpoint
         download_count: 0,
         source: 'openlibrary',
         description: typeof work.description === 'string' ? work.description : work.description?.value
@@ -370,7 +399,8 @@ const convertOpenLibraryWorkToBook = async (work: OpenLibraryWork): Promise<Book
         for (const authorRef of work.authors) {
             try {
                 // Fetch author details via proxy
-                const authorResponse = await fetchViaProxy(`${OPENLIBRARY_EXTERNAL_BASE}${authorRef.author.key}.json`);
+                // Use BACKEND_BASE_URL for Open Library metadata proxy
+                const authorResponse = await fetchWithRetry(`${BACKEND_BASE_URL}/api/openlibrary${authorRef.author.key}.json`);
                 const author: OpenLibraryAuthor = await authorResponse.json();
                 book.authors.push({
                     name: author.name,
@@ -384,6 +414,7 @@ const convertOpenLibraryWorkToBook = async (work: OpenLibraryWork): Promise<Book
         }
     }
 
+    // If Open Library provides cover IDs, store the *external* URL here.
     if (work.covers && work.covers[0]) {
         book.formats['image/jpeg'] = `https://covers.openlibrary.org/b/id/${work.covers[0]}-L.jpg`;
     }
@@ -399,7 +430,7 @@ const convertArchiveToBook = async (doc: ArchiveItem): Promise<Book | null> => {
             title: doc.title || 'Unknown Title',
             authors: [],
             subjects: typeof doc.subject === 'string' ? [doc.subject] : (doc.subject || []),
-            formats: {
+            formats: { // These are content formats, not cover display formats
                 'text/html': `https://archive.org/details/${doc.identifier}`,
                 'application/pdf': `https://archive.org/download/${doc.identifier}/${doc.identifier}.pdf`
             },
@@ -419,6 +450,9 @@ const convertArchiveToBook = async (doc: ArchiveItem): Promise<Book | null> => {
             book.authors = [{ name: 'Unknown Author' }];
         }
 
+        // Note: Internet Archive covers are handled by the backend's /api/book/:source/:id/cover endpoint
+        // No need to add them to book.formats here for display purposes.
+
         return book;
     } catch (error) {
         console.warn('Error converting Archive book:', error);
@@ -434,7 +468,7 @@ const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
         title: item.title || 'Unknown Title',
         authors: item.creator ? (Array.isArray(item.creator) ? item.creator.map((name: string) => ({ name })) : [{ name: item.creator }]) : [{ name: 'Unknown Author' }],
         subjects: item.subject ? (Array.isArray(item.subject) ? item.subject : [item.subject]) : [],
-        formats: {
+        formats: { // These are content formats, not cover display formats
             'text/html': `https://archive.org/details/${item.identifier}`,
             'application/pdf': `https://archive.org/download/${item.identifier}/${item.identifier}.pdf`
         },
@@ -467,6 +501,8 @@ export const fetchBookContent = async (book: Book): Promise<string> => {
         }
     } else if (book.source === 'openlibrary' || book.source === 'archive') {
         if (book.ia_identifier) {
+            // These are URLs for actual book content, not covers.
+            // Using the full external path as it will be proxied by fetchContentViaProxy
             contentUrls.push(
                 `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`,
                 `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.txt`,
@@ -488,7 +524,7 @@ export const fetchBookContent = async (book: Book): Promise<string> => {
     for (const contentUrl of contentUrls) {
         try {
             // contentUrl is already guaranteed to be a string here due to checks above
-            const response = await fetchViaProxy(contentUrl);
+            const response = await fetchContentViaProxy(contentUrl); // Use the content proxy
             if (response.ok) {
                 const content = await response.text();
                 if (content && content.trim().length > 0) {
@@ -516,13 +552,12 @@ export const downloadBookAsFile = async (book: Book, format: 'txt' | 'html' | 'p
         const cleanTitle = book.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
         if (format === 'pdf' && book.formats['application/pdf']) {
-            // Direct PDF download for Internet Archive books (via proxy)
+            // Direct PDF download for Internet Archive books (via content proxy)
             const pdfUrl = book.formats['application/pdf'];
             if (!pdfUrl) {
                 throw new Error('PDF download URL not found for this book.');
             }
-            // Removed responseType, fetchViaProxy just needs the URL and options
-            const response = await fetchViaProxy(pdfUrl);
+            const response = await fetchContentViaProxy(pdfUrl, { headers: { 'Accept': 'application/pdf' } }); // Request PDF specifically
             const pdfBlob = await response.blob();
 
             filename = `${cleanTitle}.pdf`;
@@ -538,7 +573,7 @@ export const downloadBookAsFile = async (book: Book, format: 'txt' | 'html' | 'p
         }
 
         // For text and HTML formats, fetch content
-        content = await fetchBookContent(book); // This already uses the proxy
+        content = await fetchBookContent(book); // This already uses the content proxy
         filename = `${cleanTitle}.${format}`;
 
         if (format === 'html') {
@@ -684,4 +719,11 @@ export const updateBookNote = async (bookId: number | string, userId: string, no
         book.id === bookId ? { ...book, notes: note } : book
     );
     localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify(updatedBooks));
+};
+
+// --- HELPER FOR CONSTRUCTING COVER URL (for your UI component) ---
+export const getBookCoverUrl = (book: Book): string => {
+    // Ensure this matches your deployed backend URL.
+    const backendBaseUrl = 'https://xbookhub-project.onrender.com';
+    return `${backendBaseUrl}/api/book/${book.source}/${book.id}/cover`;
 };
