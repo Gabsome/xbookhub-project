@@ -17,8 +17,6 @@ app.use((req, res, next) => {
 });
 
 // --- Helper function to clean HTML content ---
-// This is a simple HTML stripper. For robust content extraction from full webpages,
-// consider using a library like 'cheerio' (npm install cheerio).
 function cleanHtmlContent(html) {
     if (!html) return '';
     let cleaned = html
@@ -36,6 +34,94 @@ function cleanHtmlContent(html) {
         .trim();
     return cleaned;
 }
+
+// --- NEW HELPER FUNCTION FOR INTERNET ARCHIVE CONTENT RESOLUTION ---
+/**
+ * Resolves the direct content URL for an Internet Archive item based on desired format.
+ * Queries IA metadata to find available files.
+ * @param {string} iaIdentifier - The Internet Archive item identifier (e.g., 'gutenberg_book_1342').
+ * @param {string} requestedFormat - The desired content format ('txt', 'html', 'pdf', 'epub').
+ * @returns {Promise<{url: string, cleanHtml: boolean}|null>} - The content URL and whether to clean HTML, or null if not found.
+ */
+async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
+    const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
+    console.log(`[IA Resolver] Fetching metadata for ${iaIdentifier} from: ${metadataUrl}`);
+
+    try {
+        const response = await fetch(metadataUrl, {
+            headers: {
+                'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)',
+                'Accept': 'application/json',
+            }
+        });
+
+        if (!response.ok) {
+            console.warn(`[IA Resolver] Failed to fetch metadata for ${iaIdentifier}: ${response.status} ${response.statusText}`);
+            return null;
+        }
+
+        const metadata = await response.json();
+        const files = metadata.files || [];
+
+        let bestMatchUrl = null;
+        let cleanHtml = false;
+
+        const downloadBaseUrl = `https://archive.org/download/${iaIdentifier}/`;
+
+        // Map requested format to common Internet Archive file formats
+        const formatMap = {
+            'txt': ['DjVu text', 'Text', 'Plain Text'],
+            'html': ['HTML', 'Animated GIF', 'JPEG', 'Image Container'], // HTML pages, or sometimes images that render as html
+            'pdf': ['PDF'],
+            'epub': ['EPUB'],
+        };
+
+        // Prioritize requested format
+        const potentialFormats = formatMap[requestedFormat] || [];
+        for (const iaFormat of potentialFormats) {
+            const foundFile = files.find(file => file.format === iaFormat);
+            if (foundFile && foundFile.name) {
+                bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
+                cleanHtml = (iaFormat === 'HTML'); // Clean if it's an HTML page
+                console.log(`[IA Resolver] Found direct match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
+                return { url: bestMatchUrl, cleanHtml };
+            }
+        }
+
+        // Fallback: If specific format not found, try common text/html first, then pdf/epub
+        // This makes it more robust if the exact requested format isn't available.
+        if (!bestMatchUrl) {
+            const fallbackOrder = ['txt', 'epub', 'pdf', 'html']; // Ordered by general preference
+            for (const formatKey of fallbackOrder) {
+                if (formatKey === requestedFormat) continue; // Already tried exact match
+                const fallbackIAFormats = formatMap[formatKey] || [];
+                for (const iaFormat of fallbackIAFormats) {
+                    const foundFile = files.find(file => file.format === iaFormat);
+                    if (foundFile && foundFile.name) {
+                        bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
+                        cleanHtml = (iaFormat === 'HTML');
+                        console.log(`[IA Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
+                        return { url: bestMatchUrl, cleanHtml };
+                    }
+                }
+            }
+        }
+
+        // Final fallback: If no specific file is found, link to the item's details page as HTML
+        if (!bestMatchUrl) {
+            bestMatchUrl = `https://archive.org/details/${iaIdentifier}`;
+            cleanHtml = true; // Always clean if it's the main details page
+            console.log(`[IA Resolver] No direct file found, falling back to item details page: ${bestMatchUrl}`);
+            return { url: bestMatchUrl, cleanHtml };
+        }
+
+        return null; // Should ideally not reach here if fallbacks work
+    } catch (error) {
+        console.error(`[IA Resolver Error] Could not resolve IA content for ${iaIdentifier}:`, error);
+        return null;
+    }
+}
+
 
 // --- API Endpoints ---
 
@@ -193,7 +279,7 @@ app.get('/api/fetch-book', async (req, res) => {
 // Main endpoint to resolve book ID to content URL and then fetch it
 app.get('/api/book/:source/:id/content', async (req, res) => {
     const { source, id } = req.params;
-    const { format = 'txt' } = req.query;
+    const { format = 'txt' } = req.query; // Default to 'txt'
 
     let contentUrl = null;
     let cleanHtml = false;
@@ -203,6 +289,7 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
 
         if (source === 'gutenberg') {
             const gutendexUrl = `https://gutendex.com/books/${id}/`;
+            console.log(`[Content Resolver] Fetching Gutenberg metadata from: ${gutendexUrl}`);
             const response = await fetch(gutendexUrl);
             if (!response.ok) {
                 if (response.status === 404) {
@@ -251,54 +338,27 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             }
             const workData = await workResponse.json();
 
-            // *** CRITICAL PART: Extracting the Internet Archive ID ***
-            // Common fields for IA ID: ia_collection_id, ia_loaded_id, ia_id, ocaid
-            // Sometimes it's nested or on associated editions.
             let iaIdentifier = workData.ia_collection_id || workData.ia_loaded_id || workData.ia_id || workData.ocaid;
 
-            // Sometimes, the IA ID is found on the 'first_edition' object if it exists
             if (!iaIdentifier && workData.first_editions && workData.first_editions[0] && workData.first_editions[0].ia_id) {
-                 iaIdentifier = workData.first_editions[0].ia_id;
+                iaIdentifier = workData.first_editions[0].ia_id;
             }
-
-            // Another common place: check 'editions' associated with the work if available via workData.editions_link
-            // This would require another API call, e.g., to /works/{id}/editions.json
-            // For now, we'll stick to direct properties.
-            if (!iaIdentifier) {
-                console.warn(`[Content Resolver] No direct Internet Archive identifier found in OL work data for ID: ${id}.`);
-                // You might need to add more sophisticated logic here,
-                // e.g., fetching editions linked to the work and checking them.
-            }
-
 
             if (iaIdentifier) {
                 console.log(`[Content Resolver] Found Internet Archive ID: ${iaIdentifier} for Open Library work ${id}.`);
-                // Construct Internet Archive download URLs
-                switch (format) {
-                    case 'txt':
-                        contentUrl = `https://archive.org/stream/${iaIdentifier}/${iaIdentifier}_djvu.txt`;
-                        break;
-                    case 'html':
-                        contentUrl = `https://archive.org/details/${iaIdentifier}`; // This is the IA item details page, full HTML
-                        cleanHtml = true;
-                        break;
-                    case 'pdf':
-                        contentUrl = `https://archive.org/download/${iaIdentifier}/${iaIdentifier}.pdf`;
-                        break;
-                    case 'epub':
-                        contentUrl = `https://archive.org/download/${iaIdentifier}/${iaIdentifier}.epub`;
-                        break;
-                    default:
-                        // Fallback to text if preferred format isn't directly constructible
-                        contentUrl = `https://archive.org/stream/${iaIdentifier}/${iaIdentifier}_djvu.txt` || `https://archive.org/details/${iaIdentifier}`;
-                        if (contentUrl && contentUrl.includes('html')) cleanHtml = true;
-                        break;
+                // --- Use the new helper for IA content resolution ---
+                const iaContent = await getInternetArchiveContentUrl(iaIdentifier, format);
+                if (iaContent) {
+                    contentUrl = iaContent.url;
+                    cleanHtml = iaContent.cleanHtml;
+                } else {
+                    console.warn(`[Content Resolver] getInternetArchiveContentUrl failed for IA ID ${iaIdentifier} in format ${format}.`);
                 }
             }
 
             if (!contentUrl) {
                 const message = iaIdentifier
-                    ? `An Internet Archive ID (${iaIdentifier}) was found, but no direct ${format} link could be constructed from it.`
+                    ? `An Internet Archive ID (${iaIdentifier}) was found, but no direct ${format} link could be constructed from it by the IA resolver.`
                     : 'No associated Internet Archive ID found for this Open Library work.';
                 console.warn(`[Content Resolver] No content URL for Open Library ID ${id}. ${message}`);
                 return res.status(404).json({
@@ -315,29 +375,13 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             const iaIdentifier = id;
             console.log(`[Content Resolver] Directly fetching from Internet Archive ID: ${iaIdentifier}`);
 
-            switch (format) {
-                case 'txt':
-                    contentUrl = `https://archive.org/stream/${iaIdentifier}/${iaIdentifier}_djvu.txt`;
-                    break;
-                case 'html':
-                    contentUrl = `https://archive.org/details/${iaIdentifier}`; // This is the IA item details page, full HTML
-                    cleanHtml = true;
-                    break;
-                case 'pdf':
-                    contentUrl = `https://archive.org/download/${iaIdentifier}/${iaIdentifier}.pdf`;
-                    break;
-                case 'epub':
-                    contentUrl = `https://archive.org/download/${iaIdentifier}/${iaIdentifier}.epub`;
-                    break;
-                default:
-                    // Fallback
-                    contentUrl = `https://archive.org/stream/${iaIdentifier}/${iaIdentifier}_djvu.txt` || `https://archive.org/details/${iaIdentifier}`;
-                    if (contentUrl && contentUrl.includes('html')) cleanHtml = true;
-                    break;
-            }
-
-            if (!contentUrl) {
-                console.warn(`[Content Resolver] No suitable content URL found for Internet Archive ID ${id} in format ${format}.`);
+            // --- Use the new helper for IA content resolution ---
+            const iaContent = await getInternetArchiveContentUrl(iaIdentifier, format);
+            if (iaContent) {
+                contentUrl = iaContent.url;
+                cleanHtml = iaContent.cleanHtml;
+            } else {
+                console.warn(`[Content Resolver] getInternetArchiveContentUrl failed for IA ID ${iaIdentifier} in format ${format}.`);
                 return res.status(404).json({ error: `Content in ${format} format not available for Internet Archive item ID ${id}.` });
             }
             console.log(`[Content Resolver] Internet Archive URL resolved to: ${contentUrl}`);
@@ -372,7 +416,7 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
         let errorMessage = 'Failed to resolve or fetch book content.';
         if (error.name === 'AbortError') {
             errorMessage = 'Content fetching timed out.';
-        } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.message.includes('getaddrinfo')) {
             errorMessage = 'Could not connect to the external book source.';
         } else if (error.message.includes('404')) {
             errorMessage = 'Content not found in the requested format or source.';
