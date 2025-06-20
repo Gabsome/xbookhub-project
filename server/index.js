@@ -35,7 +35,7 @@ function cleanHtmlContent(html) {
     return cleaned;
 }
 
-// --- HELPER FUNCTION FOR INTERNET ARCHIVE CONTENT RESOLUTION ---
+// --- HELPER FUNCTION FOR INTERNET ARCHIVE CONTENT RESOLUTION (for *book content*, not covers) ---
 /**
  * Resolves the direct content URL for an Internet Archive item based on desired format.
  * Queries IA metadata to find available files.
@@ -45,7 +45,7 @@ function cleanHtmlContent(html) {
  */
 async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
     const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
-    console.log(`[IA Resolver] Fetching metadata for ${iaIdentifier} from: ${metadataUrl}`);
+    console.log(`[IA Content Resolver] Fetching metadata for ${iaIdentifier} from: ${metadataUrl}`);
 
     try {
         const response = await fetch(metadataUrl, {
@@ -57,7 +57,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
         });
 
         if (!response.ok) {
-            console.warn(`[IA Resolver] Failed to fetch metadata for ${iaIdentifier}: ${response.status} ${response.statusText}`);
+            console.warn(`[IA Content Resolver] Failed to fetch metadata for ${iaIdentifier}: ${response.status} ${response.statusText}`);
             return null;
         }
 
@@ -71,7 +71,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
 
         const formatMap = {
             'txt': ['DjVu text', 'Text', 'Plain Text'],
-            'html': ['HTML', 'Animated GIF', 'JPEG', 'Image Container'],
+            'html': ['HTML', 'Animated GIF', 'JPEG', 'Image Container'], // IA's HTML might be primary content
             'pdf': ['PDF'],
             'epub': ['EPUB'],
         };
@@ -82,7 +82,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
             if (foundFile && foundFile.name) {
                 bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
                 cleanHtml = (iaFormat === 'HTML');
-                console.log(`[IA Resolver] Found direct match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
+                console.log(`[IA Content Resolver] Found direct match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
                 return { url: bestMatchUrl, cleanHtml };
             }
         }
@@ -97,7 +97,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
                 if (foundFile && foundFile.name) {
                     bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
                     cleanHtml = (iaFormat === 'HTML');
-                    console.log(`[IA Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
+                    console.log(`[IA Content Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
                     return { url: bestMatchUrl, cleanHtml };
                 }
             }
@@ -107,13 +107,13 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
             // As a very last resort for content, link to the item details page, but this won't be direct content
             bestMatchUrl = `https://archive.org/details/${iaIdentifier}`;
             cleanHtml = true; // Still attempt to clean in case it's an HTML page
-            console.log(`[IA Resolver] No direct file found, falling back to item details page: ${bestMatchUrl}`);
+            console.log(`[IA Content Resolver] No direct file found, falling back to item details page: ${bestMatchUrl}`);
             return { url: bestMatchUrl, cleanHtml };
         }
 
         return null; // Should not be reached if fallback logic is thorough
     } catch (error) {
-        console.error(`[IA Resolver Error] Could not resolve IA content for ${iaIdentifier}:`, error);
+        console.error(`[IA Content Resolver Error] Could not resolve IA content for ${iaIdentifier}:`, error);
         return null;
     }
 }
@@ -129,7 +129,7 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// General purpose content fetching endpoint (your existing proxy) - NO CHANGES TO BOOK FETCHING LOGIC
+// General purpose content fetching endpoint (your existing proxy)
 app.get('/api/fetch-book', async (req, res) => {
     const { url, clean } = req.query;
 
@@ -273,9 +273,9 @@ app.get('/api/fetch-book', async (req, res) => {
 // --- General Purpose Image Proxy Endpoint (Enhanced for robustness) ---
 app.get('/api/fetch-image', async (req, res) => {
     const { url } = req.query;
-    // Using a more reliable, simple placeholder that works without external services for immediate fallback
+    // Using a simple, reliable placeholder that works without external services for immediate fallback
     const defaultCoverUrl = 'https://via.placeholder.com/128x190?text=No+Cover';
-    const defaultCoverContentType = 'image/png'; // Default content type for the placeholder
+    const defaultCoverContentType = 'image/png';
 
     // Helper function to send the default image
     const sendDefaultCover = async (status = 200, errorMessage = 'No image available') => {
@@ -292,8 +292,8 @@ app.get('/api/fetch-image', async (req, res) => {
             defaultImageResponse.body.pipe(res);
         } catch (err) {
             console.error('Failed to fetch hardcoded default cover:', err);
-            // If even the hardcoded default fails, send a tiny transparent GIF or PNG to avoid browser errors
-            // 1x1 transparent PNG base64
+            // If even the hardcoded default fails, send a tiny transparent PNG to avoid browser errors
+            // 1x1 transparent PNG base64 encoded
             res.status(500).set('Content-Type', 'image/png').send(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"));
         }
     };
@@ -306,7 +306,7 @@ app.get('/api/fetch-image', async (req, res) => {
     try {
         new URL(url); // Validate URL format
     } catch (error) {
-        console.warn(`[Image Proxy] Invalid URL format: ${url}. Serving default cover.`);
+        console.warn(`[Image Proxy] Invalid URL format: "${url}". Serving default cover.`);
         return sendDefaultCover(400, 'Invalid image URL format.');
     }
 
@@ -386,47 +386,56 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
                 const response = await fetch(gutendexUrl, { timeout: 10000 });
                 if (response.ok) {
                     const book = await response.json();
+                    // Gutendex provides direct image links, prioritize JPEG
                     coverExternalUrl = book.formats['image/jpeg'] || book.formats['image/png'] || book.formats['image/webp'];
                     console.log(`[Cover Resolver] Gutenberg direct cover from Gutendex: ${coverExternalUrl || 'Not found'}`);
                     if (!coverExternalUrl) {
                         // Fallback to the general Gutenberg cover URL pattern if Gutendex doesn't explicitly list it
+                        // This is a common pattern for Gutenberg books but might not exist for all.
                         coverExternalUrl = `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`;
                         console.log(`[Cover Resolver] Gutenberg fallback cover pattern: ${coverExternalUrl}`);
                     }
                 } else {
                     console.warn(`[Cover Resolver] Failed to fetch Gutendex metadata for ID ${id}: ${response.status} ${response.statusText}`);
+                    // Fallback to the general Gutenberg cover URL pattern if Gutendex call fails
                     coverExternalUrl = `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`;
                     console.log(`[Cover Resolver] Gutenberg fallback cover pattern due to Gutendex error: ${coverExternalUrl}`);
                 }
             } catch (gutendexError) {
-                console.error(`[Cover Resolver] Error fetching from Gutendex for ID ${id}: ${gutendexError.message}. Falling back to default pattern.`);
+                console.error(`[Cover Resolver] Error fetching from Gutendex for ID ${id}: ${gutendexError.message}. Falling back to Gutenberg pattern.`);
+                // If Gutendex fetch itself throws an error (e.g., network issue), use the direct Gutenberg URL pattern
                 coverExternalUrl = `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`;
             }
 
         } else if (source === 'openlibrary') {
-            // Open Library covers can be retrieved using /b/id/ (numeric cover_id) or /b/olid/ (OLID)
-            if (!isNaN(Number(id))) { // Check if the ID is purely numeric (likely a cover_id)
+            // Open Library covers require either an OLID, ISBN, or a numeric cover_id.
+            // Based on frontend discussion, `id` should be the `openlibrary_cover_id` if available,
+            // which is the numeric cover ID.
+            if (!isNaN(Number(id))) { // Check if the ID is purely numeric (likely a cover_i)
                 coverExternalUrl = `https://covers.openlibrary.org/b/id/${id}-L.jpg`; // L for Large, M for Medium, S for Small
                 console.log(`[Cover Resolver] Open Library cover from numeric ID: ${coverExternalUrl}`);
             } else if (id.startsWith('OL')) { // Could be an OLID (e.g., OL12345M) or a Work ID (e.g., OL12345W)
                 coverExternalUrl = `https://covers.openlibrary.org/b/olid/${id}-L.jpg`; // Tries by OLID
                 console.log(`[Cover Resolver] Open Library cover from OLID/Work ID: ${coverExternalUrl}`);
+                // If this fails, a more robust solution would be to fetch openlibrary.org/works/{id}.json
+                // and then try to find `covers` array or `ia_id`.
             } else {
                 console.warn(`[Cover Resolver] Open Library ID "${id}" is not a direct numeric cover ID or OLID. Cannot construct direct cover URL.`);
-                // If ID format doesn't match direct cover pattern, coverExternalUrl remains null, triggering default fallback.
+                // No direct URL from ID, will fall back to default via /api/fetch-image as coverExternalUrl remains null
             }
         } else if (source === 'archive') {
             const iaIdentifier = id;
             console.log(`[Cover Resolver] Attempting to resolve Internet Archive cover for ID: ${iaIdentifier}`);
 
-            // Strategy 1: Try the standard Internet Archive /services/img/ identifier URL (often auto-generated)
+            // Strategy 1: Try the standard Internet Archive /services/img/ identifier URL (often auto-generated and reliable)
             let potentialCoverUrl = `https://archive.org/services/img/${iaIdentifier}/full/!300,400/0/default.jpg`;
-            console.log(`[Cover Resolver] Trying IA standard service URL: ${potentialCoverUrl}`);
+            console.log(`[Cover Resolver] Attempting IA standard service URL: ${potentialCoverUrl}`);
+            coverExternalUrl = potentialCoverUrl; // Set as initial candidate
 
-            // Strategy 2: Fallback to querying IA metadata for specific cover image files (more robust)
+            // Strategy 2: More robust IA cover finding by querying metadata for specific image files
             try {
                 const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
-                console.log(`[Cover Resolver] Fetching IA metadata as fallback for specific file: ${metadataUrl}`);
+                console.log(`[Cover Resolver] Fetching IA metadata for specific file search from: ${metadataUrl}`);
                 const metadataResponse = await fetch(metadataUrl, {
                     headers: { 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)' },
                     timeout: 5000 // Shorter timeout for metadata
@@ -453,33 +462,28 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
                         coverExternalUrl = `https://archive.org/download/${iaIdentifier}/${encodeURIComponent(coverFile.name)}`;
                         console.log(`[Cover Resolver] Found specific IA file cover: ${coverExternalUrl}`);
                     } else {
-                        // If no specific file, revert to the service URL as the primary candidate
-                        coverExternalUrl = potentialCoverUrl;
-                        console.log(`[Cover Resolver] No specific IA cover file found, using IA service URL: ${coverExternalUrl}`);
+                        console.log(`[Cover Resolver] No specific IA cover file found in metadata. Sticking with IA service URL: ${coverExternalUrl}`);
                     }
                 } else {
                     console.warn(`[Cover Resolver] Failed to fetch IA metadata for ${iaIdentifier}: ${metadataResponse.status} ${metadataResponse.statusText}. Using IA service URL as fallback.`);
-                    coverExternalUrl = potentialCoverUrl; // Fallback to service URL if metadata fetch fails
+                    // coverExternalUrl remains potentialCoverUrl from before
                 }
             } catch (metaError) {
                 console.error(`[Cover Resolver] Error fetching IA metadata for ${iaIdentifier}:`, metaError.message, 'Using IA service URL as fallback.');
-                coverExternalUrl = potentialCoverUrl; // Fallback to service URL on metadata error
+                // coverExternalUrl remains potentialCoverUrl from before
             }
-
         } else {
             console.warn(`[Cover Resolver] Unsupported source: ${source}`);
-            // If source is unsupported, the `coverExternalUrl` will remain null, triggering the default fallback.
-            // Explicitly set a 400 status if no valid source is matched, before attempting to serve an image.
             return res.status(400).json({ error: 'Unsupported book source for cover. Must be "gutenberg", "openlibrary", or "archive".' });
         }
 
-        // --- Proxy the resolved cover URL through /api/fetch-image ---
+        // --- Proxy the resolved cover URL through /api/fetch-image endpoint ---
         // This ensures consistent caching, error handling (with default image fallback), and referer management.
         const internalProxyUrl = coverExternalUrl
             ? `${req.protocol}://${req.get('host')}/api/fetch-image?url=${encodeURIComponent(coverExternalUrl)}`
-            : `${req.protocol}://${req.get('host')}/api/fetch-image`; // If no URL, /fetch-image will serve default
+            : `${req.protocol}://${req.get('host')}/api/fetch-image`; // If no URL was resolved, /fetch-image will serve default
 
-        console.log(`[Cover Resolver] Proxying to internal image endpoint: ${internalProxyUrl}`);
+        console.log(`[Cover Resolver] Proxying resolved cover URL (or default) via internal image endpoint: ${internalProxyUrl}`);
 
         const proxyResponse = await fetch(internalProxyUrl);
 
@@ -493,7 +497,7 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
             }
         });
         if (coverExternalUrl) {
-            res.set('X-Source-Resolved-Cover-URL', coverExternalUrl); // Custom header for debugging
+            res.set('X-Source-Resolved-Cover-URL', coverExternalUrl); // Custom header for debugging the resolved URL
         }
         proxyResponse.body.pipe(res); // Pipe the image stream
 
@@ -522,7 +526,7 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
             res.set('X-Error-Message', errorMessage); // Add a custom error header for client-side debugging
             proxyResponse.body.pipe(res);
         } catch (fallbackError) {
-            console.error(`[Cover Resolution Fallback Error for ${source}/${id}]:`, fallbackError.message);
+            console.error(`[Cover Resolution Fallback Error for ${source}/${id}]: Failed to retrieve default cover image:`, fallbackError.message);
             // If even the fallback fails, send a generic JSON error as a last resort
             res.status(500).json({
                 error: 'Failed to retrieve cover image and fallback.',
