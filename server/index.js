@@ -1,13 +1,19 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)); // Ensure node-fetch is correctly imported
+// Ensure node-fetch is correctly imported for ESM and CJS compatibility
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const app = express();
+const path = require('path'); // Require path module
+
+// --- Configuration ---
+const PORT = process.env.PORT || 3001;
+const ALLOWED_ORIGINS = ['https://xbook-hub.netlify.app', 'http://localhost:5173'];
 
 // --- Middleware ---
 app.use(cors({
-    origin: ['https://xbook-hub.netlify.app', 'http://localhost:5173'],
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'X-Requested-With'], // Added X-Requested-With
     credentials: true
 }));
 
@@ -15,6 +21,14 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
 });
+
+// Serve static files from the 'public' directory
+// This is crucial if you later decide to use a local 'no_cover.jpg'
+// For now, your /api/fetch-image uses an external placeholder.
+// If you want a local 'no_cover.jpg', ensure it exists in 'public'
+// and update the defaultCoverUrl in /api/fetch-image.
+app.use(express.static(path.join(__dirname, 'public')));
+
 
 // --- Helper function to clean HTML content ---
 function cleanHtmlContent(html) {
@@ -425,55 +439,115 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
             }
         } else if (source === 'archive') {
             const iaIdentifier = id;
+            let bookMetadata = null; // To store metadata for Open Library fallback
+
             console.log(`[Cover Resolver] Attempting to resolve Internet Archive cover for ID: ${iaIdentifier}`);
 
-            // Strategy 1: Try the standard Internet Archive /services/img/ identifier URL (often auto-generated and reliable)
-            let potentialCoverUrl = `https://archive.org/services/img/${iaIdentifier}/full/!300,400/0/default.jpg`;
-            console.log(`[Cover Resolver] Attempting IA standard service URL: ${potentialCoverUrl}`);
-            coverExternalUrl = potentialCoverUrl; // Set as initial candidate
-
-            // Strategy 2: More robust IA cover finding by querying metadata for specific image files
+            // Strategy 1: Attempt Internet Archive's /services/img/ endpoint
+            const iaServiceUrl = `https://archive.org/services/img/${iaIdentifier}/full/!300,400/0/default.jpg`;
             try {
-                const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
-                console.log(`[Cover Resolver] Fetching IA metadata for specific file search from: ${metadataUrl}`);
-                const metadataResponse = await fetch(metadataUrl, {
-                    headers: { 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)' },
-                    timeout: 5000 // Shorter timeout for metadata
-                });
+                // Use HEAD request to quickly check existence and content type without downloading
+                const iaServiceResponse = await fetch(iaServiceUrl, { method: 'HEAD', timeout: 5000 });
+                const iaServiceContentType = iaServiceResponse.headers.get('content-type');
 
-                if (metadataResponse.ok) {
-                    const metadata = await metadataResponse.json();
-                    const files = metadata.files || [];
-
-                    // Prioritize common cover image filenames and formats
-                    const coverFile = files.find(file =>
-                        file.name &&
-                        (file.name.toLowerCase().includes('cover.jpg') ||
-                         file.name.toLowerCase().includes('thumb.jpg') ||
-                         file.name.toLowerCase().includes('thumbnail.jpg') ||
-                         file.name.toLowerCase().includes('cover.png') ||
-                         file.name.toLowerCase().endsWith('.jpg') || // General .jpg as a last resort in files
-                         file.name.toLowerCase().endsWith('.png')) && // General .png as a last resort in files
-                        (file.format === 'JPEG' || file.format === 'PNG' || file.format === 'Image') // Check common image formats
-                    );
-
-                    if (coverFile) {
-                        // If a specific cover file is found, use its direct download URL
-                        coverExternalUrl = `https://archive.org/download/${iaIdentifier}/${encodeURIComponent(coverFile.name)}`;
-                        console.log(`[Cover Resolver] Found specific IA file cover: ${coverExternalUrl}`);
-                    } else {
-                        console.log(`[Cover Resolver] No specific IA cover file found in metadata. Sticking with IA service URL: ${coverExternalUrl}`);
-                    }
+                if (iaServiceResponse.ok && iaServiceContentType && iaServiceContentType.startsWith('image/')) {
+                    coverExternalUrl = iaServiceUrl;
+                    console.log(`[Cover Resolver] Found IA cover via standard service: ${coverExternalUrl}`);
                 } else {
-                    console.warn(`[Cover Resolver] Failed to fetch IA metadata for ${iaIdentifier}: ${metadataResponse.status} ${metadataResponse.statusText}. Using IA service URL as fallback.`);
-                    // coverExternalUrl remains potentialCoverUrl from before
+                    console.warn(`[Cover Resolver] IA standard service URL not found or not image for ${iaIdentifier}. Status: ${iaServiceResponse.status}, Type: ${iaServiceContentType}.`);
                 }
-            } catch (metaError) {
-                console.error(`[Cover Resolver] Error fetching IA metadata for ${iaIdentifier}:`, metaError.message, 'Using IA service URL as fallback.');
-                // coverExternalUrl remains potentialCoverUrl from before
+            } catch (error) {
+                console.error(`[Cover Resolver] Error checking IA standard service for ${iaIdentifier}: ${error.message}`);
             }
+
+            // Strategy 2: If no cover yet, query IA metadata for specific image files (e.g., 'cover.jpg')
+            if (!coverExternalUrl) {
+                try {
+                    const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
+                    console.log(`[Cover Resolver] Fetching IA metadata for specific file search from: ${metadataUrl}`);
+                    const metadataResponse = await fetch(metadataUrl, {
+                        headers: { 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)' },
+                        timeout: 7000 // A bit more time for full metadata
+                    });
+
+                    if (metadataResponse.ok) {
+                        const metadata = await metadataResponse.json();
+                        const files = metadata.files || [];
+
+                        // Store metadata for potential Open Library fallback
+                        bookMetadata = {
+                            title: metadata.metadata?.title,
+                            creator: metadata.metadata?.creator // Often the author
+                        };
+
+                        // Prioritize common cover image filenames and formats
+                        const coverFile = files.find(file =>
+                            file.name && (
+                                file.name.toLowerCase().includes('cover.jpg') ||
+                                file.name.toLowerCase().includes('cover.png') ||
+                                file.name.toLowerCase().includes('thumb.jpg') ||
+                                file.name.toLowerCase().includes('thumbnail.jpg') ||
+                                (file.format === 'JPEG' && files.length < 20) || // If few files, any JPEG might be cover
+                                (file.format === 'PNG' && files.length < 20)
+                            ) && (file.format === 'JPEG' || file.format === 'PNG' || file.format === 'Image')
+                        );
+
+                        if (coverFile) {
+                            // If a specific cover file is found, use its direct download URL
+                            coverExternalUrl = `https://archive.org/download/${iaIdentifier}/${encodeURIComponent(coverFile.name)}`;
+                            console.log(`[Cover Resolver] Found specific IA file cover: ${coverExternalUrl}`);
+                        } else {
+                            console.log(`[Cover Resolver] No specific IA cover file found in metadata for ${iaIdentifier}.`);
+                        }
+                    } else {
+                        console.warn(`[Cover Resolver] Failed to fetch IA metadata for ${iaIdentifier}: ${metadataResponse.status} ${metadataResponse.statusText}.`);
+                    }
+                } catch (metaError) {
+                    console.error(`[Cover Resolver] Error fetching IA metadata for ${iaIdentifier}:`, metaError.message);
+                }
+            }
+
+            // Fallback 1: If no cover from Internet Archive's methods, try Open Library
+            // Only proceed if we have basic book metadata from IA to search OL
+            if (!coverExternalUrl && bookMetadata && bookMetadata.title) {
+                console.log(`[Cover Resolver] IA cover not found for ${iaIdentifier}. Attempting Open Library fallback...`);
+                let olSearchQuery = `title=${encodeURIComponent(bookMetadata.title)}`;
+                if (bookMetadata.creator) {
+                    olSearchQuery += `&author=${encodeURIComponent(bookMetadata.creator)}`;
+                }
+
+                const olSearchUrl = `https://openlibrary.org/search.json?${olSearchQuery}&limit=1`;
+                console.log(`[Cover Resolver] Searching Open Library for: ${olSearchUrl}`);
+                try {
+                    const olSearchResponse = await fetch(olSearchUrl, { timeout: 7000 });
+                    if (olSearchResponse.ok) {
+                        const olSearchData = await olSearchResponse.json();
+                        if (olSearchData.docs && olSearchData.docs.length > 0) {
+                            const firstMatch = olSearchData.docs[0];
+                            if (firstMatch.cover_i) { // cover_i is the cover ID for covers.openlibrary.org
+                                coverExternalUrl = `https://covers.openlibrary.org/b/id/${firstMatch.cover_i}-L.jpg`;
+                                console.log(`[Cover Resolver] Found Open Library cover via search for IA book ${iaIdentifier}: ${coverExternalUrl}`);
+                            } else if (firstMatch.key) { // Fallback to work key if cover_i not direct
+                                const olWorkId = firstMatch.key.split('/').pop();
+                                coverExternalUrl = `https://covers.openlibrary.org/b/olid/${olWorkId}-L.jpg`;
+                                console.log(`[Cover Resolver] Found Open Library cover (via work ID) for IA book ${iaIdentifier}: ${coverExternalUrl}`);
+                            } else {
+                                console.warn(`[Cover Resolver] Open Library search found match but no cover_i or key for ${iaIdentifier}.`);
+                            }
+                        } else {
+                            console.warn(`[Cover Resolver] No matching book found on Open Library for IA ID ${iaIdentifier}.`);
+                        }
+                    } else {
+                        console.warn(`[Cover Resolver] Failed to search Open Library for IA ID ${iaIdentifier}: ${olSearchResponse.status}`);
+                    }
+                } catch (error) {
+                    console.error(`[Cover Resolver] Error during Open Library fallback for ${iaIdentifier}: ${error.message}`);
+                }
+            }
+
         } else {
             console.warn(`[Cover Resolver] Unsupported source: ${source}`);
+            // Explicitly return a 400 for unsupported source instead of relying on the proxy.
             return res.status(400).json({ error: 'Unsupported book source for cover. Must be "gutenberg", "openlibrary", or "archive".' });
         }
 
@@ -772,8 +846,7 @@ app.get('/api/archive/*', async (req, res) => {
 });
 
 // START THE SERVER
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    console.log(`CORS enabled for origins: ${['https://xbook-hub.netlify.app', 'http://localhost:5173'].join(', ')}`);
+    console.log(`CORS enabled for origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });
