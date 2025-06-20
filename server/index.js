@@ -89,20 +89,17 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
         }
 
         // Fallback: If specific format not found, try common text/html first, then pdf/epub
-        // This makes it more robust if the exact requested format isn't available.
-        if (!bestMatchUrl) {
-            const fallbackOrder = ['txt', 'epub', 'pdf', 'html']; // Ordered by general preference
-            for (const formatKey of fallbackOrder) {
-                if (formatKey === requestedFormat) continue; // Already tried exact match
-                const fallbackIAFormats = formatMap[formatKey] || [];
-                for (const iaFormat of fallbackIAFormats) {
-                    const foundFile = files.find(file => file.format === iaFormat);
-                    if (foundFile && foundFile.name) {
-                        bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
-                        cleanHtml = (iaFormat === 'HTML');
-                        console.log(`[IA Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
-                        return { url: bestMatchUrl, cleanHtml };
-                    }
+        const fallbackOrder = ['txt', 'epub', 'pdf', 'html']; // Ordered by general preference
+        for (const formatKey of fallbackOrder) {
+            if (formatKey === requestedFormat) continue; // Already tried exact match
+            const fallbackIAFormats = formatMap[formatKey] || [];
+            for (const iaFormat of fallbackIAFormats) {
+                const foundFile = files.find(file => file.format === iaFormat);
+                if (foundFile && foundFile.name) {
+                    bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
+                    cleanHtml = (iaFormat === 'HTML');
+                    console.log(`[IA Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
+                    return { url: bestMatchUrl, cleanHtml };
                 }
             }
         }
@@ -216,6 +213,7 @@ app.get('/api/fetch-book', async (req, res) => {
             return res.send(Buffer.from(buffer));
         }
 
+        // IMPORTANT: This block prevents fetching images!
         if (!contentType.includes('text/') &&
             !contentType.includes('application/xml') &&
             !contentType.includes('application/xhtml') &&
@@ -276,7 +274,230 @@ app.get('/api/fetch-book', async (req, res) => {
 });
 
 
-// Main endpoint to resolve book ID to content URL and then fetch it
+// --- NEW GENERAL PURPOSE IMAGE PROXY ENDPOINT ---
+app.get('/api/fetch-image', async (req, res) => {
+    const { url } = req.query;
+
+    if (!url) {
+        return res.status(400).json({
+            error: 'Missing URL parameter',
+            message: 'Please provide an image URL to fetch'
+        });
+    }
+
+    try {
+        new URL(url); // Validate URL format
+    } catch (error) {
+        return res.status(400).json({
+            error: 'Invalid URL format',
+            message: 'The provided URL is not valid'
+        });
+    }
+
+    console.log(`[Image Proxy] Attempting to fetch image: ${url}`);
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for images
+
+        const headers = {
+            'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)',
+            'Referer': req.headers.referer || 'https://xbook-hub.netlify.app', // Send referer if present or default
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+        };
+
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers,
+            redirect: 'follow',
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            console.error(`[Image Proxy] HTTP Error: ${response.status} ${response.statusText} for ${url}`);
+            return res.status(response.status).json({
+                error: `HTTP ${response.status}`,
+                message: `Failed to fetch image: ${response.statusText}`,
+                url: url
+            });
+        }
+
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+        // Only allow image content types
+        if (!contentType.startsWith('image/')) {
+            console.warn(`[Image Proxy] Unsupported content type for image: ${contentType} for URL: ${url}`);
+            return res.status(400).json({
+                error: 'Unsupported content type',
+                message: `Content type ${contentType} is not an image.`,
+                contentType: contentType
+            });
+        }
+
+        console.log(`[Image Proxy] Successfully fetched image, Content-Type: ${contentType}`);
+
+        res.set({
+            'Content-Type': contentType,
+            'Content-Length': response.headers.get('content-length'), // Pass through content length for efficiency
+            'Cache-Control': 'public, max-age=86400', // Cache images for longer (24 hours)
+            'X-Source-URL': url
+        });
+
+        // Pipe the image stream directly to the client
+        response.body.pipe(res);
+
+    } catch (error) {
+        console.error('[Image Proxy Error]:', error);
+
+        if (error.name === 'AbortError') {
+            return res.status(408).json({
+                error: 'Request timeout',
+                message: 'The image request took too long to complete. Please try again.',
+                url: url
+            });
+        }
+        res.status(500).json({
+            error: 'Internal server error',
+            message: 'An unexpected error occurred while fetching the image',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            url: url
+        });
+    }
+});
+
+
+// --- NEW ENDPOINT TO RESOLVE AND SERVE BOOK COVERS ---
+app.get('/api/book/:source/:id/cover', async (req, res) => {
+    const { source, id } = req.params;
+
+    let coverUrl = null;
+
+    try {
+        console.log(`[Cover Resolver] Request for cover, source: "${source}", ID: "${id}"`);
+
+        if (source === 'gutenberg') {
+            const gutendexUrl = `https://gutendex.com/books/${id}/`;
+            const response = await fetch(gutendexUrl);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    return res.status(404).json({ error: `Gutenberg book with ID ${id} not found.` });
+                }
+                throw new Error(`Failed to fetch Gutenberg metadata: ${response.statusText}`);
+            }
+            const book = await response.json();
+            // Gutendex often provides direct image links in formats
+            // Look for common cover image types
+            coverUrl = book.formats['image/jpeg'] || book.formats['image/png'] || book.formats['image/webp'];
+            if (!coverUrl) {
+                // Fallback to text/html with image, sometimes covers are linked within HTML
+                const htmlUrl = book.formats['text/html'] || book.formats['text/html; charset=utf-8'];
+                if (htmlUrl) {
+                    console.warn(`[Cover Resolver] No direct image URL for Gutenberg ${id}, checking linked HTML: ${htmlUrl}`);
+                    // You could fetch the HTML and try to parse it for an img tag.
+                    // For simplicity, we'll note this is a limitation without complex parsing here.
+                    // A more advanced solution would involve a library like 'cheerio' to extract <img> src.
+                    // For now, if no direct image/jpeg, we assume no cover found.
+                    // If you need to parse HTML for images, uncomment/implement the following:
+                    // const htmlResponse = await fetch(htmlUrl);
+                    // const htmlContent = await htmlResponse.text();
+                    // const cheerio = require('cheerio');
+                    // const $ = cheerio.load(htmlContent);
+                    // coverUrl = $('img[alt="Cover image"]').attr('src') || $('img').first().attr('src');
+                    // if (coverUrl && !coverUrl.startsWith('http')) {
+                    //     coverUrl = new URL(coverUrl, htmlUrl).href; // Resolve relative URLs
+                    // }
+                }
+            }
+            console.log(`[Cover Resolver] Gutenberg cover URL: ${coverUrl}`);
+
+        } else if (source === 'openlibrary') {
+            // Open Library uses a separate covers API
+            // It needs the OLID (Open Library ID for the book edition, not the work ID) or an ISBN.
+            // For now, we will use the Work ID, but often covers are tied to Editions.
+            // If the work itself doesn't yield a cover, you might need to find an edition.
+            coverUrl = `https://covers.openlibrary.org/b/olid/${id}-M.jpg`; // -M for Medium, -L for Large, -S for Small
+            console.log(`[Cover Resolver] Open Library cover URL (based on work ID): ${coverUrl}`);
+            // To be more precise, you would need to fetch work.json -> editions -> then for each edition, get its OLID/ISBN.
+            // e.g. https://openlibrary.org/works/OL158488W.json -> "first_publish_date": "1940" -> find an edition ID (OLID)
+            // or fetch https://openlibrary.org/works/OL158488W/editions.json and pick one with a cover.
+            // For simplicity, we're assuming the work ID *might* work for some covers, or this might be a placeholder.
+            // A more robust solution might involve:
+            // const workResponse = await fetch(`https://openlibrary.org/works/${id}.json`);
+            // if (workResponse.ok) {
+            //     const workData = await workResponse.json();
+            //     const iaIdentifier = workData.ia_collection_id || workData.ia_loaded_id || workData.ia_id || workData.ocaid;
+            //     if (iaIdentifier) { // Try Internet Archive cover if OL doesn't have it directly
+            //        const iaCover = await getInternetArchiveCoverUrl(iaIdentifier); // A new helper similar to getInternetArchiveContentUrl
+            //        if (iaCover) coverUrl = iaCover;
+            //     }
+            // }
+
+
+        } else if (source === 'archive') {
+            const iaIdentifier = id;
+            const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
+            const response = await fetch(metadataUrl, {
+                headers: { 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)' }
+            });
+            if (response.ok) {
+                const metadata = await response.json();
+                const files = metadata.files || [];
+                // Look for common thumbnail or cover image files
+                const coverFile = files.find(file =>
+                    file.name &&
+                    (file.name.includes('thumb.jpg') ||
+                     file.name.includes('cover.jpg') ||
+                     file.name.includes('first_page.jpg')) &&
+                    file.format === 'JPEG'
+                );
+                if (coverFile) {
+                    coverUrl = `https://archive.org/download/${iaIdentifier}/${encodeURIComponent(coverFile.name)}`;
+                } else {
+                    // Fallback to a common pattern for IA thumbnails if no specific file found
+                    coverUrl = `https://archive.org/services/img/thumb/${iaIdentifier}`;
+                }
+            }
+            console.log(`[Cover Resolver] Internet Archive cover URL: ${coverUrl}`);
+
+        } else {
+            return res.status(400).json({ error: 'Unsupported book source for cover. Must be "gutenberg", "openlibrary", or "archive".' });
+        }
+
+        // If a coverUrl was successfully resolved, use the /api/fetch-image proxy
+        if (coverUrl) {
+            console.log(`[Cover Resolver] Proceeding to fetch cover via /api/fetch-image for: ${coverUrl}`);
+            const internalProxyUrl = `${req.protocol}://${req.get('host')}/api/fetch-image?url=${encodeURIComponent(coverUrl)}`;
+
+            // Make an internal request to your new image proxy endpoint
+            const proxyResponse = await fetch(internalProxyUrl);
+
+            // Pipe the response directly back to the client
+            res.status(proxyResponse.status);
+            proxyResponse.headers.forEach((value, name) => {
+                if (name !== 'content-encoding' && name !== 'transfer-encoding') { // Avoid issues if content is gzipped by external server
+                    res.set(name, value);
+                }
+            });
+            res.set('X-Source-Resolved-Cover-URL', coverUrl);
+            proxyResponse.body.pipe(res);
+        } else {
+            return res.status(404).json({ error: 'No cover found for this book.', source, id });
+        }
+
+    } catch (error) {
+        console.error(`[Cover Resolution Error for ${source}/${id}]:`, error);
+        res.status(error.response?.status || 500).json({
+            error: 'Failed to fetch book cover',
+            message: 'An unexpected error occurred while resolving or fetching the cover',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            source: source,
+            id: id
+        });
+    }
+});
+
+
+// Main endpoint to resolve book ID to content URL and then fetch it (no changes here for covers)
 app.get('/api/book/:source/:id/content', async (req, res) => {
     const { source, id } = req.params;
     const { format = 'txt' } = req.query; // Default to 'txt'
@@ -531,7 +752,9 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Xbook-Hub Server running on http://localhost:${PORT}`);
     console.log(`📚 Content resolution endpoint: /api/book/:source/:id/content`);
+    console.log(`🖼️  Cover image resolution endpoint: /api/book/:source/:id/cover`);
     console.log(`🔗 General URL proxy: /api/fetch-book?url=...`);
+    console.log(`🖼️  General image proxy: /api/fetch-image?url=...`);
     console.log(`🔍 Metadata proxies: /api/openlibrary/* and /api/archive/*`);
 });
 
