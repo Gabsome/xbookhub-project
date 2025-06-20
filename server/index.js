@@ -1,13 +1,16 @@
 const express = require('express');
 const cors = require('cors');
-// Ensure node-fetch is correctly imported for ESM and CJS compatibility
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const app = express();
-const path = require('path'); // Require path module
+const path = require('path');
 
 // --- Configuration ---
 const PORT = process.env.PORT || 3001;
 const ALLOWED_ORIGINS = ['https://xbook-hub.netlify.app', 'http://localhost:5173'];
+
+// Optional: Google Books API Key
+// You should store this securely, e.g., in an environment variable.
+const GOOGLE_BOOKS_API_KEY = process.env.GOOGLE_BOOKS_API_KEY || ''; // Replace with your actual key if needed
 
 // --- Middleware ---
 app.use(cors({
@@ -24,7 +27,6 @@ app.use((req, res, next) => {
 
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
-
 
 // --- Helper function to clean HTML content ---
 function cleanHtmlContent(html) {
@@ -74,7 +76,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
 
         const formatMap = {
             'txt': ['DjVu text', 'Text', 'Plain Text'],
-            'html': ['HTML', 'Animated GIF', 'JPEG', 'Image Container'],
+            'html': ['HTML', 'Animated GIF', 'JPEG', 'Image Container'], // Keep HTML if available, allow cleaning
             'pdf': ['PDF'],
             'epub': ['EPUB'],
         };
@@ -92,7 +94,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
 
         const fallbackOrder = ['txt', 'epub', 'pdf', 'html'];
         for (const formatKey of fallbackOrder) {
-            if (formatKey === requestedFormat) continue;
+            if (formatKey === requestedFormat) continue; // Already tried the requested format
             const fallbackIAFormats = formatMap[formatKey] || [];
             for (const iaFormat of fallbackIAFormats) {
                 const foundFile = files.find(file => file.format === iaFormat);
@@ -106,8 +108,9 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
         }
 
         if (!bestMatchUrl) {
+            // Fallback to the item's details page as a last resort if no direct file is found
             bestMatchUrl = `https://archive.org/details/${iaIdentifier}`;
-            cleanHtml = true;
+            cleanHtml = true; // Assume it might be HTML content that needs cleaning
             console.log(`[IA Content Resolver] No direct file found, falling back to item details page: ${bestMatchUrl}`);
             return { url: bestMatchUrl, cleanHtml };
         }
@@ -119,14 +122,13 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
     }
 }
 
-
 // --- API Endpoints ---
 
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        services: ['Project Gutenberg', 'Open Library', 'Internet Archive', 'Google Books (fallback)']
+        services: ['Project Gutenberg', 'Internet Archive', 'Google Books']
     });
 });
 
@@ -172,7 +174,10 @@ app.get('/api/fetch-book', async (req, res) => {
         if (url.includes('archive.org')) {
             headers['Referer'] = 'https://archive.org/';
             headers['Accept'] = 'text/html,text/plain,application/pdf,application/epub+zip,*/*';
+        } else if (url.includes('books.google.com')) {
+            headers['Referer'] = 'https://books.google.com/';
         }
+
 
         const response = await fetch(url, {
             signal: controller.signal,
@@ -215,7 +220,7 @@ app.get('/api/fetch-book', async (req, res) => {
             return;
         }
 
-        if (!contentType.includes('text/') &&
+        if (!contentType.startsWith('text/') &&
             !contentType.includes('application/xml') &&
             !contentType.includes('application/xhtml') &&
             !contentType.includes('application/json')) {
@@ -276,7 +281,6 @@ app.get('/api/fetch-book', async (req, res) => {
         });
     }
 });
-
 
 // --- General Purpose Image Proxy Endpoint (Enhanced for robustness) ---
 app.get('/api/fetch-image', async (req, res) => {
@@ -378,7 +382,6 @@ app.get('/api/fetch-image', async (req, res) => {
     }
 });
 
-
 // --- UPDATED ENDPOINT TO RESOLVE AND SERVE BOOK COVERS ---
 app.get('/api/book/:source/:id/cover', async (req, res) => {
     const { source, id } = req.params;
@@ -420,48 +423,6 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
             }
             console.log(`[Cover Resolver] Gutenberg: Final resolved coverExternalUrl (before Google fallback): ${coverExternalUrl}`);
 
-        } else if (source === 'openlibrary') {
-            console.log(`[Cover Resolver] Open Library: Processing ID "${id}"`);
-            const openLibraryWorkUrl = `https://openlibrary.org/works/${id}.json`; // Fetch work metadata to get title/author
-            try {
-                const workResponse = await fetch(openLibraryWorkUrl, { timeout: 10000 });
-                if (workResponse.ok) {
-                    const workData = await workResponse.json();
-                    bookTitle = workData.title;
-                    if (workData.authors && workData.authors.length > 0 && workData.authors[0].author) {
-                        // For Open Library, authors often come as { key: '/authors/OL...' }
-                        // You might need an extra fetch to resolve the author's name if not directly available.
-                        // For simplicity, we'll try to get it directly if possible or skip.
-                        try {
-                             const authorKey = workData.authors[0].author.key;
-                             const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`, { timeout: 5000 });
-                             if (authorResponse.ok) {
-                                 const authorData = await authorResponse.json();
-                                 bookAuthor = authorData.name;
-                             }
-                        } catch (authorError) {
-                            console.warn(`[Cover Resolver] OL: Could not fetch author name for ${id}:`, authorError.message);
-                        }
-                    }
-                    console.log(`[Cover Resolver] Open Library: Metadata found. Title: "${bookTitle}", Author: "${bookAuthor}"`);
-                } else {
-                    console.warn(`[Cover Resolver] OL: Failed to fetch work metadata for ID ${id}: ${workResponse.status}`);
-                }
-            } catch (error) {
-                console.error(`[Cover Resolver] OL: Error fetching work metadata for ID ${id}:`, error.message);
-            }
-
-            if (!isNaN(Number(id))) {
-                coverExternalUrl = `https://covers.openlibrary.org/b/id/${id}-L.jpg`;
-                console.log(`[Cover Resolver] Open Library: Resolved cover from numeric ID: ${coverExternalUrl}`);
-            } else if (id.startsWith('OL')) {
-                coverExternalUrl = `https://covers.openlibrary.org/b/olid/${id}-L.jpg`;
-                console.log(`[Cover Resolver] Open Library: Resolved cover from OLID/Work ID: ${coverExternalUrl}`);
-            } else {
-                console.warn(`[Cover Resolver] Open Library: ID "${id}" is not a direct numeric cover ID or OLID. Cannot construct direct cover URL.`);
-            }
-            console.log(`[Cover Resolver] Open Library: Final resolved coverExternalUrl (before Google fallback): ${coverExternalUrl}`);
-
         } else if (source === 'archive') {
             const iaIdentifier = id;
 
@@ -488,7 +449,7 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
                             file.name.toLowerCase().includes('cover.png') ||
                             file.name.toLowerCase().includes('thumb.jpg') ||
                             file.name.toLowerCase().includes('thumbnail.jpg') ||
-                            (file.format === 'JPEG' && files.length < 20) ||
+                            (file.format === 'JPEG' && files.length < 20) || // Heuristic: if many files, don't just pick any JPEG/PNG
                             (file.format === 'PNG' && files.length < 20)
                         ) && (file.format === 'JPEG' || file.format === 'PNG' || file.format === 'Image')
                     );
@@ -505,63 +466,56 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
             } catch (metaError) {
                 console.error(`[Cover Resolver] Internet Archive: Error fetching IA metadata for ${iaIdentifier}:`, metaError.message);
             }
-
-            // Fallback 1 (Open Library search for IA books):
-            if (!coverExternalUrl && bookTitle) { // Only try OL fallback if we have a title from IA
-                console.log(`[Cover Resolver] Internet Archive: IA cover not found for ${iaIdentifier}. Attempting Open Library fallback...`);
-                let olSearchQuery = `title=${encodeURIComponent(bookTitle)}`;
-                if (bookAuthor) {
-                    olSearchQuery += `&author=${encodeURIComponent(bookAuthor)}`;
-                }
-
-                const olSearchUrl = `https://openlibrary.org/search.json?${olSearchQuery}&limit=1`;
-                console.log(`[Cover Resolver] Internet Archive: Searching Open Library for: ${olSearchUrl}`);
-                try {
-                    const olSearchResponse = await fetch(olSearchUrl, { timeout: 7000 });
-                    if (olSearchResponse.ok) {
-                        const olSearchData = await olSearchResponse.json();
-                        if (olSearchData.docs && olSearchData.docs.length > 0) {
-                            const firstMatch = olSearchData.docs[0];
-                            if (firstMatch.cover_i) {
-                                coverExternalUrl = `https://covers.openlibrary.org/b/id/${firstMatch.cover_i}-L.jpg`;
-                                console.log(`[Cover Resolver] Internet Archive: Found Open Library cover via search for IA book ${iaIdentifier}: ${coverExternalUrl}`);
-                            } else if (firstMatch.key) {
-                                const olWorkId = firstMatch.key.split('/').pop();
-                                coverExternalUrl = `https://covers.openlibrary.org/b/olid/${olWorkId}-L.jpg`;
-                                console.log(`[Cover Resolver] Internet Archive: Found Open Library cover (via work ID) for IA book ${iaIdentifier}: ${coverExternalUrl}`);
-                            } else {
-                                console.warn(`[Cover Resolver] Internet Archive: Open Library search found match but no cover_i or key.`);
-                            }
-                        } else {
-                            console.warn(`[Cover Resolver] Internet Archive: No matching book found on Open Library.`);
-                        }
-                    } else {
-                        console.warn(`[Cover Resolver] Internet Archive: Failed to search Open Library: ${olSearchResponse.status}`);
-                    }
-                } catch (error) {
-                    console.error(`[Cover Resolver] Internet Archive: Error during Open Library fallback: ${error.message}`);
-                }
-            }
             console.log(`[Cover Resolver] Internet Archive: Final resolved coverExternalUrl (before Google fallback): ${coverExternalUrl}`);
+        } else if (source === 'google') {
+            // Directly resolve Google Books cover by Volume ID
+            console.log(`[Cover Resolver] Google Books: Attempting to resolve cover for Volume ID: ${id}`);
+            const googleBooksApiUrl = `https://www.googleapis.com/books/v1/volumes/${id}?fields=volumeInfo/imageLinks,volumeInfo/title,volumeInfo/authors&key=${GOOGLE_BOOKS_API_KEY}`;
+            console.log(`[Cover Resolver] Google Books: Fetching details from: ${googleBooksApiUrl}`);
+
+            try {
+                const googleResponse = await fetch(googleBooksApiUrl, { timeout: 7000 });
+                if (googleResponse.ok) {
+                    const googleData = await googleResponse.json();
+                    const volumeInfo = googleData.volumeInfo;
+                    bookTitle = volumeInfo.title;
+                    if (volumeInfo.authors && volumeInfo.authors.length > 0) {
+                        bookAuthor = volumeInfo.authors[0];
+                    }
+
+                    if (volumeInfo.imageLinks) {
+                        coverExternalUrl = volumeInfo.imageLinks.medium || volumeInfo.imageLinks.large || volumeInfo.imageLinks.thumbnail || volumeInfo.imageLinks.smallThumbnail;
+                        console.log(`[Cover Resolver] Google Books: Found direct cover for Volume ID ${id}: ${coverExternalUrl}`);
+                    } else {
+                        console.warn(`[Cover Resolver] Google Books: No imageLinks found for Volume ID ${id}.`);
+                    }
+                } else {
+                    console.warn(`[Cover Resolver] Google Books: API error for Volume ID ${id}: ${googleResponse.status} ${googleResponse.statusText}`);
+                }
+            } catch (googleError) {
+                console.error(`[Cover Resolver] Google Books: Error fetching details for Volume ID ${id}: ${googleError.message}`);
+            }
+            console.log(`[Cover Resolver] Google Books: Final resolved coverExternalUrl: ${coverExternalUrl}`);
 
         } else {
             console.warn(`[Cover Resolver] ERROR: Unsupported source: ${source}`);
-            return res.status(400).json({ error: 'Unsupported book source for cover. Must be "gutenberg", "openlibrary", or "archive".' });
+            return res.status(400).json({ error: 'Unsupported book source for cover. Must be "gutenberg", "archive", or "google".' });
         }
 
-        // --- Google Books API Fallback ---
+        // --- Google Books API Fallback (only if no cover found and we have title/author) ---
+        // This block now also accounts for cases where the specific Google ID lookup failed to yield a cover.
         if (!coverExternalUrl && bookTitle) {
-            console.log(`[Cover Resolver] No cover found from primary sources. Attempting Google Books API fallback for "${bookTitle}" by "${bookAuthor || 'Unknown Author'}"`);
+            console.log(`[Cover Resolver] No cover found from primary sources (or direct Google ID failed). Attempting Google Books API search fallback for "${bookTitle}" by "${bookAuthor || 'Unknown Author'}"`);
             let googleSearchQuery = `intitle:"${encodeURIComponent(bookTitle)}"`;
             if (bookAuthor) {
                 googleSearchQuery += `+inauthor:"${encodeURIComponent(bookAuthor)}"`;
             }
 
-            const googleBooksApiUrl = `https://www.googleapis.com/books/v1/volumes?q=${googleSearchQuery}&maxResults=1&printType=books&fields=items(volumeInfo/imageLinks,volumeInfo/industryIdentifiers)`;
-            console.log(`[Cover Resolver] Google Books: Searching API: ${googleBooksApiUrl}`);
+            const googleBooksSearchApiUrl = `https://www.googleapis.com/books/v1/volumes?q=${googleSearchQuery}&maxResults=1&printType=books&fields=items(volumeInfo/imageLinks,volumeInfo/industryIdentifiers)&key=${GOOGLE_BOOKS_API_KEY}`;
+            console.log(`[Cover Resolver] Google Books Fallback: Searching API: ${googleBooksSearchApiUrl}`);
 
             try {
-                const googleResponse = await fetch(googleBooksApiUrl, { timeout: 7000 });
+                const googleResponse = await fetch(googleBooksSearchApiUrl, { timeout: 7000 });
                 if (googleResponse.ok) {
                     const googleData = await googleResponse.json();
                     if (googleData.items && googleData.items.length > 0) {
@@ -569,24 +523,22 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
                         const imageLinks = volumeInfo.imageLinks;
 
                         if (imageLinks) {
-                            // Prioritize larger sizes
                             coverExternalUrl = imageLinks.medium || imageLinks.large || imageLinks.thumbnail || imageLinks.smallThumbnail;
-                            console.log(`[Cover Resolver] Google Books: Found cover: ${coverExternalUrl}`);
+                            console.log(`[Cover Resolver] Google Books Fallback: Found cover: ${coverExternalUrl}`);
                         } else {
-                            console.warn(`[Cover Resolver] Google Books: No imageLinks found for "${bookTitle}".`);
+                            console.warn(`[Cover Resolver] Google Books Fallback: No imageLinks found for search "${bookTitle}".`);
                         }
                     } else {
-                        console.warn(`[Cover Resolver] Google Books: No results found for "${bookTitle}"`);
+                        console.warn(`[Cover Resolver] Google Books Fallback: No results found for search "${bookTitle}"`);
                     }
                 } else {
-                    console.warn(`[Cover Resolver] Google Books: API error: ${googleResponse.status} ${googleResponse.statusText}`);
+                    console.warn(`[Cover Resolver] Google Books Fallback: API error: ${googleResponse.status} ${googleResponse.statusText}`);
                 }
             } catch (googleError) {
-                console.error(`[Cover Resolver] Google Books: Error during API call: ${googleError.message}`);
+                console.error(`[Cover Resolver] Google Books Fallback: Error during API call: ${googleError.message}`);
             }
         }
         // --- End Google Books API Fallback ---
-
 
         // --- Proxy the resolved cover URL through /api/fetch-image endpoint ---
         const internalProxyUrl = coverExternalUrl
@@ -647,7 +599,7 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
 });
 
 
-// Main endpoint to resolve book ID to content URL and then fetch it (NO CHANGES TO THIS LOGIC)
+// Main endpoint to resolve book ID to content URL and then fetch it
 app.get('/api/book/:source/:id/content', async (req, res) => {
     const { source, id } = req.params;
     const { format = 'txt' } = req.query;
@@ -693,49 +645,6 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             }
             console.log(`[Content Resolver] Gutenberg URL resolved to: ${contentUrl}`);
 
-        } else if (source === 'openlibrary') {
-            const openLibraryWorkUrl = `https://openlibrary.org/works/${id}.json`;
-            console.log(`[Content Resolver] Fetching Open Library work details from: ${openLibraryWorkUrl}`);
-            const workResponse = await fetch(openLibraryWorkUrl, { timeout: 10000 });
-
-            if (!workResponse.ok) {
-                if (workResponse.status === 404) {
-                    return res.status(404).json({ error: `Open Library work with ID ${id} not found.` });
-                }
-                throw new Error(`Failed to fetch Open Library work metadata: ${workResponse.statusText}`);
-            }
-            const workData = await workResponse.json();
-
-            let iaIdentifier = workData.ia_collection_id || workData.ia_loaded_id || workData.ia_id || workData.ocaid;
-
-            if (!iaIdentifier && workData.first_editions && workData.first_editions[0] && workData.first_editions[0].ia_id) {
-                iaIdentifier = workData.first_editions[0].ia_id;
-            }
-
-            if (iaIdentifier) {
-                console.log(`[Content Resolver] Found Internet Archive ID: ${iaIdentifier} for Open Library work ${id}.`);
-                const iaContent = await getInternetArchiveContentUrl(iaIdentifier, format);
-                if (iaContent) {
-                    contentUrl = iaContent.url;
-                    cleanHtml = iaContent.cleanHtml;
-                } else {
-                    console.warn(`[Content Resolver] getInternetArchiveContentUrl failed for IA ID ${iaIdentifier} in format ${format}.`);
-                }
-            }
-
-            if (!contentUrl) {
-                const message = iaIdentifier
-                    ? `An Internet Archive ID (${iaIdentifier}) was found, but no direct ${format} link could be constructed from it by the IA resolver.`
-                    : 'No associated Internet Archive ID found for this Open Library work.';
-                console.warn(`[Content Resolver] No content URL for Open Library ID ${id}. ${message}`);
-                return res.status(404).json({
-                    error: `Content not directly available in ${format} format for Open Library work ID ${id}.`,
-                    message: message + ' Open Library primarily provides metadata. Try searching directly on Internet Archive or looking for "Read Online" links on Open Library.',
-                    iaIdentifierFound: !!iaIdentifier
-                });
-            }
-            console.log(`[Content Resolver] Open Library/IA URL resolved to: ${contentUrl}`);
-
         } else if (source === 'archive') {
             const iaIdentifier = id;
             console.log(`[Content Resolver] Directly fetching from Internet Archive ID: ${iaIdentifier}`);
@@ -750,8 +659,59 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             }
             console.log(`[Content Resolver] Internet Archive URL resolved to: ${contentUrl}`);
 
+        } else if (source === 'google') {
+            console.log(`[Content Resolver] Google Books: Attempting to fetch content for Volume ID: ${id}, Format: ${format}`);
+            const googleBooksApiUrl = `https://www.googleapis.com/books/v1/volumes/${id}?fields=accessInfo(epub,pdf,webReaderLink)&key=${GOOGLE_BOOKS_API_KEY}`;
+
+            try {
+                const response = await fetch(googleBooksApiUrl, { timeout: 10000 });
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        return res.status(404).json({ error: `Google Book with Volume ID ${id} not found.` });
+                    }
+                    throw new Error(`Failed to fetch Google Books metadata: ${response.statusText}`);
+                }
+                const book = await response.json();
+                const accessInfo = book.accessInfo;
+
+                if (accessInfo) {
+                    if (format === 'epub' && accessInfo.epub && accessInfo.epub.isAvailable && accessInfo.epub.downloadLink) {
+                        contentUrl = accessInfo.epub.downloadLink;
+                        console.log(`[Content Resolver] Google Books: Found EPUB download link: ${contentUrl}`);
+                    } else if (format === 'pdf' && accessInfo.pdf && accessInfo.pdf.isAvailable && accessInfo.pdf.downloadLink) {
+                        contentUrl = accessInfo.pdf.downloadLink;
+                        console.log(`[Content Resolver] Google Books: Found PDF download link: ${contentUrl}`);
+                    } else if (format === 'html' && accessInfo.webReaderLink) {
+                        contentUrl = accessInfo.webReaderLink;
+                        cleanHtml = true; // Web reader link content is typically HTML that can benefit from cleaning
+                        console.log(`[Content Resolver] Google Books: Found webReaderLink (HTML): ${contentUrl}`);
+                    } else {
+                        // Fallback: Prioritize EPUB, then PDF, then webReaderLink
+                        if (accessInfo.epub && accessInfo.epub.isAvailable && accessInfo.epub.downloadLink) {
+                            contentUrl = accessInfo.epub.downloadLink;
+                            console.log(`[Content Resolver] Google Books: Falling back to EPUB: ${contentUrl}`);
+                        } else if (accessInfo.pdf && accessInfo.pdf.isAvailable && accessInfo.pdf.downloadLink) {
+                            contentUrl = accessInfo.pdf.downloadLink;
+                            console.log(`[Content Resolver] Google Books: Falling back to PDF: ${contentUrl}`);
+                        } else if (accessInfo.webReaderLink) {
+                            contentUrl = accessInfo.webReaderLink;
+                            cleanHtml = true;
+                            console.log(`[Content Resolver] Google Books: Falling back to webReaderLink (HTML): ${contentUrl}`);
+                        }
+                    }
+                }
+
+                if (!contentUrl) {
+                    console.warn(`[Content Resolver] Google Books: No suitable content URL found for Volume ID ${id} in format ${format}. Available accessInfo:`, accessInfo);
+                    return res.status(404).json({ error: `Content in ${format} format not available for Google Book ID ${id}. Try a different format or it might only have a preview.` });
+                }
+            } catch (googleError) {
+                console.error(`[Content Resolver] Google Books: Error fetching content for ID ${id}: ${googleError.message}`);
+                return res.status(500).json({ error: 'Failed to fetch content from Google Books.', message: googleError.message });
+            }
+
         } else {
-            return res.status(400).json({ error: 'Unsupported book source. Must be "gutenberg", "openlibrary", or "archive".' });
+            return res.status(400).json({ error: 'Unsupported book source. Must be "gutenberg", "archive", or "google".' });
         }
 
         if (contentUrl) {
@@ -789,43 +749,6 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             source: source,
             id: id,
             format: format
-        });
-    }
-});
-
-
-// Proxy endpoint for Open Library API metadata (NO CHANGES)
-app.get('/api/openlibrary/*', async (req, res) => {
-    try {
-        const path = req.params[0];
-        const queryString = req.url.split('?')[1] || '';
-        const olUrl = `https://openlibrary.org/${path}${queryString ? '?' + queryString : ''}`;
-
-        console.log(`[OL Metadata Proxy] Proxying Open Library request: ${olUrl}`);
-
-        const response = await fetch(olUrl, {
-            headers: {
-                'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)',
-                'Accept': 'application/json',
-            },
-            timeout: 15000
-        });
-
-        if (!response.ok) {
-            return res.status(response.status).json({
-                error: `Open Library API Error: ${response.status}`,
-                message: response.statusText
-            });
-        }
-
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error('[OL Metadata Proxy Error]:', error);
-        res.status(500).json({
-            error: 'Proxy error',
-            message: 'Failed to fetch from Open Library API',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
 });
@@ -869,6 +792,47 @@ app.get('/api/archive/*', async (req, res) => {
         res.status(500).json({
             error: 'Proxy error',
             message: 'Failed to fetch from Internet Archive API',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        });
+    }
+});
+
+// NEW: Proxy endpoint for Google Books API metadata
+app.get('/api/googlebooks/*', async (req, res) => {
+    try {
+        const path = req.params[0]; // e.g., 'volumes' or 'volumes/ID'
+        const queryString = req.url.split('?')[1] || '';
+        let googleUrl = `https://www.googleapis.com/books/v1/${path}${queryString ? '?' + queryString : ''}`;
+
+        // Append API key if it's not already in the query string
+        if (GOOGLE_BOOKS_API_KEY && !googleUrl.includes('key=')) {
+            googleUrl += `${queryString ? '&' : '?'}key=${GOOGLE_BOOKS_API_KEY}`;
+        }
+
+        console.log(`[Google Books Proxy] Proxying Google Books request: ${googleUrl}`);
+
+        const response = await fetch(googleUrl, {
+            headers: {
+                'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)',
+                'Accept': 'application/json',
+            },
+            timeout: 15000
+        });
+
+        if (!response.ok) {
+            return res.status(response.status).json({
+                error: `Google Books API Error: ${response.status}`,
+                message: response.statusText
+            });
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('[Google Books Proxy Error]:', error);
+        res.status(500).json({
+            error: 'Proxy error',
+            message: 'Failed to fetch from Google Books API',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
