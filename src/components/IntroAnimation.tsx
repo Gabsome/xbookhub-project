@@ -1,84 +1,83 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import pageFlipSound from '../sounds/one-page-book-flip-101928.mp3';
 import booksImage from '../assets/books.jpg'; // Ensure the path is correct
 
 const IntroAnimation = ({ onComplete }: { onComplete: () => void }) => {
   const [show, setShow] = useState(true);
-  const soundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    const audio = new Audio(pageFlipSound);
-    audio.volume = 0.9;
-    soundRef.current = audio;
-
-    // Try playing the sound immediately
-    audio.play().catch((err) => {
-      console.warn('Autoplay blocked:', err);
-    });
-
-    // Fallback if autoplay fails
-    const handleUserInteraction = () => {
-      if (audio.paused) {
-        audio.play().catch(() => {});
-      }
-      window.removeEventListener('click', handleUserInteraction);
-    };
-    window.addEventListener('click', handleUserInteraction);
-
     const timer = setTimeout(() => {
       setShow(false);
       onComplete();
-    }, 5000); // End animation after 5s
+    }, 4000); // Increased duration slightly for the new effect
 
     return () => {
       clearTimeout(timer);
-      audio.pause();
-      audio.currentTime = 0;
-      window.removeEventListener('click', handleUserInteraction);
     };
   }, [onComplete]);
+
+  // Animation variants for a subtle grain-like text reveal
+  const textVariants = {
+    hidden: { opacity: 0, scale: 0.98, filter: 'blur(2px)' }, // Initial state with blur for "grain" feel
+    visible: { opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.8, ease: 'easeOut' } },
+  };
+
+  const imageVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: 'easeOut' } },
+  };
 
   return (
     <AnimatePresence>
       {show && (
         <motion.div
-          className="fixed top-0 left-0 w-full h-full bg-gray-900 z-50 flex justify-center items-center perspective"
+          className="fixed top-0 left-0 w-full h-full bg-gray-950 z-50 flex justify-center items-center" // Darker background
           initial={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 1 }}
+          transition={{ duration: 1, ease: 'easeOut' }}
         >
-          <div className="relative w-[340px] h-[460px] sm:w-[420px] sm:h-[520px]">
+          <div className="flex flex-col items-center justify-center">
+            {/* "Welcome to Xbook-Hub." text animation */}
             <motion.div
-              className="absolute w-full h-full rounded-lg shadow-2xl"
-              initial={{ rotateY: 0 }}
-              animate={{ rotateY: 180 }}
-              transition={{ duration: 5, ease: 'easeInOut' }}
-              style={{ transformStyle: 'preserve-3d' }}
+              className="text-center text-4xl leading-snug sm:text-5xl text-blue-300 font-oxanium" // Blueish text, Oxanium font
+              variants={textVariants}
+              initial="hidden"
+              animate="visible"
+              transition={{ delay: 0.3, ...textVariants.visible.transition }}
             >
-              {/* Front Face */}
-              <motion.div
-                className="absolute w-full h-full bg-gray-900 text-amber-400 flex flex-col items-center justify-center font-serif backface-hidden rounded-lg"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.4, duration: 1 }}
+              Welcome to<br />
+              <motion.span
+                className="text-5xl sm:text-6xl font-bold mt-2 text-indigo-400 font-space-mono" // Different color for bold part, Space Mono font
+                variants={textVariants}
+                initial="hidden"
+                animate="visible"
+                transition={{ delay: 0.7, ...textVariants.visible.transition }}
               >
-                <div className="text-center text-4xl leading-snug sm:text-5xl">
-                  Welcome to<br />
-                  <span className="text-5xl sm:text-6xl font-bold mt-2">Xbook-Hub.</span>
-                </div>
-                <img
-                  src={booksImage}
-                  alt="Books"
-                 className="w-40 sm:w-52 mt-10 sm:mt-12 object-contain select-none"
-                  draggable={false}
-                />
-              </motion.div>
+                Xbook-Hub.
+              </motion.span>
+            </motion.div>
 
-              {/* Back Face */}
-              <div className="absolute w-full h-full bg-amber-700 dark:bg-gray-900 text-white text-3xl sm:text-4xl flex items-center justify-center font-mono rotate-y-180 backface-hidden rounded-lg">
-                <div className="text-center">by Gabsome X</div>
-              </div>
+            {/* Books image animation */}
+            <motion.img
+              src={booksImage}
+              alt="Books"
+              className="w-40 sm:w-52 mt-10 sm:mt-12 object-contain select-none"
+              draggable={false}
+              variants={imageVariants}
+              initial="hidden"
+              animate="visible"
+              transition={{ delay: 1.5, ...imageVariants.visible.transition }}
+            />
+
+            {/* "by Gabsome X" text animation */}
+            <motion.div
+              className="mt-8 text-gray-400 text-xl sm:text-2xl font-space-mono" // Greyish text, Space Mono font
+              variants={imageVariants} // Reusing image variants for a similar reveal
+              initial="hidden"
+              animate="visible"
+              transition={{ delay: 2.0, ...imageVariants.visible.transition }}
+            >
+              by Gabsome X
             </motion.div>
           </div>
         </motion.div>
