@@ -7,7 +7,6 @@ const BACKEND_BASE_URL = 'https://xbookhub-project.onrender.com';
 
 // External API base URLs (used to construct the URL passed to your content proxy)
 const GUTENBERG_EXTERNAL_BASE = 'https://gutendex.com';
-// Removed OPENLIBRARY_EXTERNAL_BASE and ARCHIVE_EXTERNAL_BASE as they are no longer directly used for constructing URLs in this file
 
 // Enhanced fetch with retry logic and better error handling
 const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 3): Promise<Response> => {
@@ -333,7 +332,10 @@ export const fetchBookById = async (id: number | string): Promise<Book> => {
             // Use BACKEND_BASE_URL for Internet Archive metadata proxy
             const response = await fetchWithRetry(`${BACKEND_BASE_URL}/api/archive/metadata/${id}`);
             const metadata = await response.json();
+            // --- FIX START ---
+            // Placeholder function - you NEED to implement the logic for this
             return await convertArchiveMetadataToBook(metadata);
+            // --- FIX END ---
         } catch (error) {
             console.warn('Book not found in Internet Archive via proxy...');
         }
@@ -353,26 +355,24 @@ const convertOpenLibraryToBook = async (doc: any): Promise<Book | null> => {
             title: doc.title || 'Unknown Title',
             authors: doc.author_name ? doc.author_name.map((name: string) => ({ name })) : [{ name: 'Unknown Author' }],
             subjects: doc.subject || [],
-            formats: {}, // Initialize formats as empty, images will be handled by dedicated endpoint
-            download_count: doc.readinglog_count || 0,
+            formats: {
+                'text/html': doc.ia && doc.ia.length > 0 ? `https://archive.org/details/${doc.ia[0]}` : undefined,
+                'application/pdf': doc.ia && doc.ia.length > 0 ? `https://archive.org/download/${doc.ia[0]}/${doc.ia[0]}.pdf` : undefined,
+            },
+            download_count: 0,
             source: 'openlibrary',
-            isbn: [...(doc.isbn || []), ...(doc.isbn_13 || [])],
-            publish_date: doc.first_publish_year?.toString(),
+            isbn: doc.isbn || [],
+            publish_date: doc.first_publish_year ? doc.first_publish_year.toString() : undefined,
             publisher: doc.publisher || [],
+            description: doc.first_sentence ? doc.first_sentence.join(' ') : undefined,
+            cover_id: doc.cover_i,
+            ia_identifier: doc.ia && doc.ia.length > 0 ? doc.ia[0] : undefined,
             language: doc.language || ['en']
         };
 
-        // If Open Library provides a cover ID, store the *external* URL here.
-        // This is for metadata, not direct image loading in <img> src.
+        // Add cover URL if available
         if (doc.cover_i) {
             book.formats['image/jpeg'] = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-        }
-
-        if (doc.ia) {
-            book.ia_identifier = Array.isArray(doc.ia) ? doc.ia[0] : doc.ia;
-            // These are also external URLs, used for fetching content, not covers
-            book.formats['text/html'] = `https://archive.org/stream/${book.ia_identifier}`;
-            book.formats['application/pdf'] = `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.pdf`;
         }
 
         return book;
@@ -386,87 +386,64 @@ const convertOpenLibraryToBook = async (doc: any): Promise<Book | null> => {
 const convertOpenLibraryWorkToBook = async (work: OpenLibraryWork): Promise<Book> => {
     const book: Book = {
         id: work.key,
-        title: work.title || 'Unknown Title',
+        title: work.title,
         authors: [],
         subjects: work.subjects || [],
-        formats: {}, // Initialize formats as empty, images will be handled by dedicated endpoint
+        formats: {},
         download_count: 0,
         source: 'openlibrary',
-        description: typeof work.description === 'string' ? work.description : work.description?.value
+        description: typeof work.description === 'string' ? work.description : work.description?.value,
+        cover_id: work.covers?.[0],
+        publish_date: work.first_publish_date,
+        language: ['en']
     };
 
-    if (work.authors) {
-        for (const authorRef of work.authors) {
-            try {
-                // Fetch author details via proxy
-                // Use BACKEND_BASE_URL for Open Library metadata proxy
-                const authorResponse = await fetchWithRetry(`${BACKEND_BASE_URL}/api/openlibrary${authorRef.author.key}.json`);
-                const author: OpenLibraryAuthor = await authorResponse.json();
-                book.authors.push({
-                    name: author.name,
-                    birth_year: author.birth_date ? parseInt(author.birth_date) : undefined,
-                    death_year: author.death_date ? parseInt(author.death_date) : undefined
-                });
-            } catch (error) {
-                console.warn(`Could not fetch author ${authorRef.author.key} via proxy.`, error);
-                book.authors.push({ name: 'Unknown Author' });
-            }
+    // Fetch author information
+    if (work.authors && work.authors.length > 0) {
+        try {
+            const authorPromises = work.authors.map(async (authorRef) => {
+                try {
+                    // Use BACKEND_BASE_URL for Open Library metadata proxy
+                    const authorResponse = await fetchWithRetry(`${BACKEND_BASE_URL}/api/openlibrary${authorRef.author.key}.json`);
+                    const author: OpenLibraryAuthor = await authorResponse.json();
+                    return {
+                        name: author.name,
+                        birth_year: author.birth_date ? parseInt(author.birth_date) : undefined,
+                        death_year: author.death_date ? parseInt(author.death_date) : undefined,
+                        key: author.key
+                    };
+                } catch (error) {
+                    return { name: 'Unknown Author' };
+                }
+            });
+            book.authors = await Promise.all(authorPromises);
+        } catch (error) {
+            book.authors = [{ name: 'Unknown Author' }];
         }
+    } else {
+        book.authors = [{ name: 'Unknown Author' }];
     }
 
-    // If Open Library provides cover IDs, store the *external* URL here.
-    if (work.covers && work.covers[0]) {
+    // Add cover URL if available
+    if (work.covers && work.covers.length > 0) {
         book.formats['image/jpeg'] = `https://covers.openlibrary.org/b/id/${work.covers[0]}-L.jpg`;
     }
 
     return book;
 };
 
-// Helper function to convert Internet Archive item to Book
-const convertArchiveToBook = async (doc: ArchiveItem): Promise<Book | null> => {
-    try {
-        const book: Book = {
-            id: doc.identifier,
-            title: doc.title || 'Unknown Title',
-            authors: [],
-            subjects: typeof doc.subject === 'string' ? [doc.subject] : (doc.subject || []),
-            formats: { // These are content formats, not cover display formats
-                'text/html': `https://archive.org/details/${doc.identifier}`,
-                'application/pdf': `https://archive.org/download/${doc.identifier}/${doc.identifier}.pdf`
-            },
-            download_count: doc.downloads || 0,
-            source: 'archive',
-            ia_identifier: doc.identifier,
-            publish_date: doc.date,
-            publisher: typeof doc.publisher === 'string' ? [doc.publisher] : (doc.publisher || []),
-            description: doc.description,
-            language: typeof doc.language === 'string' ? [doc.language] : (doc.language || ['en'])
-        };
-
-        if (doc.creator) {
-            const creators = typeof doc.creator === 'string' ? [doc.creator] : doc.creator;
-            book.authors = creators.map(name => ({ name }));
-        } else {
-            book.authors = [{ name: 'Unknown Author' }];
-        }
-
-        // Note: Internet Archive covers are handled by the backend's /api/book/:source/:id/cover endpoint
-        // No need to add them to book.formats here for display purposes.
-
-        return book;
-    } catch (error) {
-        console.warn('Error converting Archive book:', error);
+// Helper function to convert Internet Archive item (from search results) to Book
+const convertArchiveToBook = async (item: ArchiveItem): Promise<Book | null> => {
+    if (!item.identifier || !item.title) {
         return null;
     }
-};
 
-// Helper function to convert Internet Archive metadata to Book
-const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
-    const item = metadata.metadata;
-    return {
+    const book: Book = {
         id: item.identifier,
-        title: item.title || 'Unknown Title',
-        authors: item.creator ? (Array.isArray(item.creator) ? item.creator.map((name: string) => ({ name })) : [{ name: item.creator }]) : [{ name: 'Unknown Author' }],
+        title: item.title,
+        authors: item.creator ?
+            (Array.isArray(item.creator) ? item.creator.map(name => ({ name })) : [{ name: item.creator }]) :
+            [{ name: 'Unknown Author' }],
         subjects: item.subject ? (Array.isArray(item.subject) ? item.subject : [item.subject]) : [],
         formats: { // These are content formats, not cover display formats
             'text/html': `https://archive.org/details/${item.identifier}`,
@@ -480,213 +457,166 @@ const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
         description: item.description,
         language: item.language ? (Array.isArray(item.language) ? item.language : [item.language]) : ['en']
     };
+
+    // Add Internet Archive cover image directly
+    book.formats['image/jpeg'] = `https://archive.org/services/img/${item.identifier}`;
+
+    return book;
 };
+
+
+// --- START OF THE MISSING FUNCTION (YOU NEED TO IMPLEMENT THIS LOGIC) ---
+// This function is expected to convert the *full metadata* response from Internet Archive's /metadata/:id endpoint
+// into your 'Book' type. The structure of this metadata might be different from ArchiveItem (which comes from search results).
+const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
+    // IMPORTANT: Replace 'any' with a more specific type definition for Internet Archive's full metadata response.
+    // You will need to inspect the structure of the JSON returned by your backend proxy for /api/archive/metadata/:id.
+
+    // Placeholder implementation - adjust this based on the actual 'metadata' structure
+    const book: Book = {
+        id: metadata.metadata?.identifier || 'unknown_id', // Adjust path based on actual metadata structure
+        title: metadata.metadata?.title || 'Unknown Title', // Adjust path
+        authors: metadata.metadata?.creator ?
+            (Array.isArray(metadata.metadata.creator) ? metadata.metadata.creator.map((name: string) => ({ name })) : [{ name: metadata.metadata.creator }]) :
+            [{ name: 'Unknown Author' }],
+        subjects: metadata.metadata?.subject ? (Array.isArray(metadata.metadata.subject) ? metadata.metadata.subject : [metadata.metadata.subject]) : [],
+        formats: {
+            // These formats are crucial. You'll need to derive them from the metadata.
+            // Internet Archive metadata might have a 'files' array or similar to find direct download links.
+            'text/html': `https://archive.org/details/${metadata.metadata?.identifier}`,
+            'application/pdf': `https://archive.org/download/${metadata.metadata?.identifier}/${metadata.metadata?.identifier}.pdf` // Common pattern, but verify
+        },
+        download_count: parseInt(metadata.metadata?.downloads || '0'), // Adjust path and parse
+        source: 'archive',
+        ia_identifier: metadata.metadata?.identifier,
+        publish_date: metadata.metadata?.date,
+        publisher: metadata.metadata?.publisher ? (Array.isArray(metadata.metadata.publisher) ? metadata.metadata.publisher : [metadata.metadata.publisher]) : [],
+        description: metadata.metadata?.description,
+        language: metadata.metadata?.language ? (Array.isArray(metadata.metadata.language) ? metadata.metadata.language : [metadata.metadata.language]) : ['en']
+    };
+
+    // Add cover image URL
+    book.formats['image/jpeg'] = `https://archive.org/services/img/${metadata.metadata?.identifier}`;
+
+    return book;
+};
+// --- END OF THE MISSING FUNCTION ---
+
 
 // Enhanced book content fetching with support for all sources
 export const fetchBookContent = async (book: Book): Promise<string> => {
-    const possibleFormats = [
-        'text/html',
-        'text/plain',
-    ];
+    try {
+        let contentUrl = '';
 
-    const contentUrls: string[] = [];
+        // Determine the best content URL based on the book's source and available formats
+        if (book.formats['text/plain']) {
+            contentUrl = book.formats['text/plain'];
+        } else if (book.formats['text/html']) {
+            contentUrl = book.formats['text/html'];
+        } else {
+            throw new Error('No readable format available for this book');
+        }
 
-    if (book.source === 'gutenberg') {
-        for (const format of possibleFormats) {
-            // Check if the format exists and is a string before adding
-            const formatUrl = book.formats[format as keyof typeof book.formats];
-            if (typeof formatUrl === 'string') {
-                contentUrls.push(formatUrl);
-            }
+        // For Internet Archive, adjust the URL for better text extraction
+        if (book.source === 'archive' && book.ia_identifier) {
+            contentUrl = `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`;
         }
-    } else if (book.source === 'openlibrary' || book.source === 'archive') {
-        if (book.ia_identifier) {
-            // These are URLs for actual book content, not covers.
-            // Using the full external path as it will be proxied by fetchContentViaProxy
-            contentUrls.push(
-                `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`,
-                `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.txt`,
-                `https://archive.org/stream/${book.ia_identifier}`
-            );
+
+        // Route through the content proxy for external URLs
+        const response = await fetchContentViaProxy(contentUrl);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch content: ${response.status} ${response.statusText}`);
         }
-        const htmlFormatUrl = book.formats['text/html'];
-        if (typeof htmlFormatUrl === 'string') {
-            contentUrls.push(htmlFormatUrl);
+
+        const content = await response.text();
+
+        if (!content || content.trim().length === 0) {
+            throw new Error('Book content is empty or unavailable');
         }
+
+        return content;
+    } catch (error) {
+        console.error('Error fetching book content via proxy:', error);
+        throw new Error('Failed to load book content. The book may not be available for reading online.');
     }
-
-    if (contentUrls.length === 0) {
-        throw new Error('No readable content available for this book.');
-    }
-
-    let lastError: Error | null = null;
-
-    for (const contentUrl of contentUrls) {
-        try {
-            // contentUrl is already guaranteed to be a string here due to checks above
-            const response = await fetchContentViaProxy(contentUrl); // Use the content proxy
-            if (response.ok) {
-                const content = await response.text();
-                if (content && content.trim().length > 0) {
-                    return content;
-                }
-            }
-        } catch (error) {
-            console.warn(`Failed to fetch content from ${contentUrl} via proxy:`, error);
-            lastError = error as Error;
-        }
-    }
-
-    throw lastError || new Error('Failed to fetch book content from any available source via server.');
 };
 
-// Download book content as file
+// Enhanced file download with support for different formats
 export const downloadBookAsFile = async (book: Book, format: 'txt' | 'html' | 'pdf' = 'txt'): Promise<void> => {
     try {
-        let content: string;
-        let filename: string;
-        let blob: Blob;
-        let mimeType: string;
+        let downloadUrl = '';
+        let mimeType = 'text/plain';
+        let fileExtension = 'txt';
 
-        // Clean filename
-        const cleanTitle = book.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-
-        if (format === 'pdf' && book.formats['application/pdf']) {
-            // Direct PDF download for Internet Archive books (via content proxy)
-            const pdfUrl = book.formats['application/pdf'];
-            if (!pdfUrl) {
-                throw new Error('PDF download URL not found for this book.');
-            }
-            const response = await fetchContentViaProxy(pdfUrl, { headers: { 'Accept': 'application/pdf' } }); // Request PDF specifically
-            const pdfBlob = await response.blob();
-
-            filename = `${cleanTitle}.pdf`;
-            const url = URL.createObjectURL(pdfBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            return;
+        switch (format) {
+            case 'pdf':
+                downloadUrl = book.formats['application/pdf'] || '';
+                mimeType = 'application/pdf';
+                fileExtension = 'pdf';
+                break;
+            case 'html':
+                downloadUrl = book.formats['text/html'] || '';
+                mimeType = 'text/html';
+                fileExtension = 'html';
+                break;
+            default:
+                downloadUrl = book.formats['text/plain'] || book.formats['text/html'] || '';
+                mimeType = 'text/plain';
+                fileExtension = 'txt';
         }
 
-        // For text and HTML formats, fetch content
-        content = await fetchBookContent(book); // This already uses the content proxy
-        filename = `${cleanTitle}.${format}`;
+        if (!downloadUrl) {
+            throw new Error(`${format.toUpperCase()} format not available for this book`);
+        }
 
-        if (format === 'html') {
-            mimeType = 'text/html';
-            blob = new Blob([content], { type: mimeType });
-        } else if (format === 'pdf') {
-            // If the above PDF direct download didn't happen, generate PDF from fetched content
-            await downloadBookAsPDF(book);
-            return;
+        // Route through the content proxy for external URLs
+        const response = await fetchContentViaProxy(downloadUrl);
+
+        if (!response.ok) {
+            throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
+        }
+
+        let blob: Blob;
+        if (format === 'pdf') {
+            const arrayBuffer = await response.arrayBuffer();
+            blob = new Blob([arrayBuffer], { type: mimeType });
         } else {
-            // Convert HTML to plain text if needed
-            const textContent = content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ');
-            mimeType = 'text/plain';
-            blob = new Blob([textContent], { type: mimeType });
+            const content = await response.text();
+            blob = new Blob([content], { type: mimeType });
         }
 
         // Create download link
-        const url = URL.createObjectURL(blob);
+        const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename;
 
-        // Trigger download
+        // Clean title for filename
+        const cleanTitle = book.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        link.download = `${cleanTitle}.${fileExtension}`;
+
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
 
-        // Clean up
-        URL.revokeObjectURL(url);
-
-        console.log(`Book "${book.title}" downloaded successfully as ${filename}`);
+        // Clean up object URL
+        window.URL.revokeObjectURL(url);
     } catch (error) {
-        console.error('Error downloading book:', error);
-        throw new Error('Failed to download book. Please try again.');
+        console.error('Error downloading book via proxy:', error);
+        throw new Error(`Failed to download book as ${format.toUpperCase()}. Please try again or choose a different format.`);
     }
 };
 
-// Enhanced PDF download with better formatting
+// Enhanced PDF download with better error handling
 export const downloadBookAsPDF = async (book: Book): Promise<void> => {
-    try {
-        const { jsPDF } = await import('jspdf');
-        const content = await fetchBookContent(book); // This already uses the proxy
-
-        // Clean and format text content
-        const textContent = content
-            .replace(/<[^>]*>/g, '\n')
-            .replace(/&[^;]+;/g, ' ')
-            .replace(/\n\s*\n/g, '\n\n')
-            .trim();
-
-        const pdf = new jsPDF();
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        const margin = 20;
-        const lineHeight = 6;
-        const maxLineWidth = pageWidth - 2 * margin;
-
-        // Add title
-        pdf.setFontSize(16);
-        pdf.setFont('helvetica', 'bold');
-        const titleLines = pdf.splitTextToSize(book.title, maxLineWidth);
-        let yPosition = margin + 10;
-
-        titleLines.forEach((line: string) => {
-            pdf.text(line, margin, yPosition);
-            yPosition += lineHeight + 2;
-        });
-
-        // Add author
-        pdf.setFontSize(12);
-        pdf.setFont('helvetica', 'italic');
-        const authorText = `by ${book.authors.map(a => a.name).join(', ')}`;
-        pdf.text(authorText, margin, yPosition);
-        yPosition += lineHeight * 2;
-
-        // Add source info
-        pdf.setFontSize(8);
-        pdf.setFont('helvetica', 'normal');
-        const sourceText = `Source: ${book.source === 'gutenberg' ? 'Project Gutenberg' : book.source === 'openlibrary' ? 'Open Library' : 'Internet Archive'}`;
-        pdf.text(sourceText, margin, yPosition);
-        yPosition += lineHeight * 2;
-
-        // Add content
-        pdf.setFontSize(10);
-        pdf.setFont('helvetica', 'normal');
-        const lines = pdf.splitTextToSize(textContent, maxLineWidth);
-
-        lines.forEach((line: string) => {
-            if (yPosition > pageHeight - margin) {
-                pdf.addPage();
-                yPosition = margin;
-            }
-            pdf.text(line, margin, yPosition);
-            yPosition += lineHeight;
-        });
-
-        // Save the PDF
-        const filename = `${book.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
-        pdf.save(filename);
-
-        console.log(`Book "${book.title}" downloaded successfully as PDF`);
-    } catch (error) {
-        console.error('Error creating PDF:', error);
-        throw new Error('Failed to create PDF. Please try downloading as text instead.');
-    }
+    await downloadBookAsFile(book, 'pdf');
 };
-
-// In a real application, these would connect to MongoDB
-// For this demo, we'll use localStorage
 
 // Save book to "MongoDB" (localStorage in this demo)
 export const saveBook = async (book: Book, userId: string): Promise<void> => {
     const savedBooks = getSavedBooks(userId);
+
+    // Check if book is already saved
     const isAlreadySaved = savedBooks.some(savedBook => savedBook.id === book.id);
 
     if (!isAlreadySaved) {
@@ -723,7 +653,17 @@ export const updateBookNote = async (bookId: number | string, userId: string, no
 
 // --- HELPER FOR CONSTRUCTING COVER URL (for your UI component) ---
 export const getBookCoverUrl = (book: Book): string => {
-    // Ensure this matches your deployed backend URL.
+    // For Internet Archive books, use direct image URL
+    if (book.source === 'archive' && book.ia_identifier) {
+        return `https://archive.org/services/img/${book.ia_identifier}`;
+    }
+
+    // For other sources, use the existing format
+    if (book.formats['image/jpeg']) {
+        return book.formats['image/jpeg'];
+    }
+
+    // Fallback to backend URL for cover proxy
     const backendBaseUrl = 'https://xbookhub-project.onrender.com';
     return `${backendBaseUrl}/api/book/${book.source}/${book.id}/cover`;
 };
