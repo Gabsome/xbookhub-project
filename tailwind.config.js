@@ -10,7 +10,7 @@ export default {
       colors: {
         amber: {
           50: '#fffbeb',
-          100: '#fef3c7',
+          100: '#fef3c7', // Slightly darker than 50
           200: '#fde68a',
           300: '#fcd34d',
           400: '#fbbf24',
@@ -20,6 +20,13 @@ export default {
           800: '#92400e',
           900: '#78350f',
         },
+        // --- NEW CUSTOM COLORS FOR THEMES ---
+        'light-background': '#f8f8f8', // Slightly off-white for a softer light theme
+        'light-text': '#333333',     // Darker grey for better contrast on light
+        'vintage-background': '#F2EBDF', // A richer, slightly darker cream/beige
+        'vintage-text': '#4A3A2F',     // A deep, warm brown for vintage text
+        'vintage-pattern-fill': '#B45309', // A deeper amber for the vintage pattern dots (same as amber-700)
+        // --- END NEW CUSTOM COLORS ---
       },
       boxShadow: {
         'book': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.05)',

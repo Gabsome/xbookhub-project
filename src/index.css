@@ -4,94 +4,102 @@
 
 @layer base {
   body {
-    @apply bg-amber-50 text-amber-900 transition-colors duration-300;
+    /* Default body style, used if no theme class is applied */
+    /* This can be a neutral base, or your preferred "default light" */
+    @apply bg-light-background text-light-text transition-colors duration-300;
     font-family: 'Lora', Georgia, 'Times New Roman', serif;
   }
-  
+
   /* Import vintage-style serif font */
   @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&display=swap');
-  
+
   /* Theme Styles */
+
+  /* Light Theme - Now uses the new custom colors */
   .theme-light {
-    @apply bg-white text-gray-900;
+    @apply bg-light-background text-light-text;
   }
-  
+
+  /* Vintage Theme - Now uses the new custom colors and updated SVG pattern */
   .theme-vintage {
-    @apply bg-amber-50 text-amber-900;
-    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d97706' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    @apply bg-vintage-background text-vintage-text;
+    /* Updated SVG fill color to match 'vintage-pattern-fill' and increased opacity */
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23B45309' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
-  
+
+  /* Dark Theme (no change requested) */
   .theme-dark {
     @apply bg-gray-900 text-gray-100;
   }
-  
+
   /* Prose styling for book content */
   .prose {
     @apply text-amber-900 dark:text-amber-100;
   }
-  
+
   .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
     @apply font-serif;
   }
-  
+
   .prose p {
     @apply my-4 leading-relaxed;
   }
-  
-  /* Custom scrollbar */
+
+  /* Custom scrollbar - adjusted for better contrast with new theme shades */
   ::-webkit-scrollbar {
     width: 8px;
   }
-  
+
   ::-webkit-scrollbar-track {
-    @apply bg-amber-100 dark:bg-gray-800;
+    @apply bg-gray-200 dark:bg-gray-800; /* Light/dark track */
   }
-  
+
   ::-webkit-scrollbar-thumb {
-    @apply bg-amber-400 dark:bg-amber-700 rounded-full;
+    @apply bg-amber-600 dark:bg-amber-700 rounded-full; /* Darker amber thumb */
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-amber-500 dark:bg-amber-600;
+    @apply bg-amber-700 dark:bg-amber-600; /* Darker amber on hover */
   }
 }
 
 @layer components {
-  /* Vintage paper texture for cards */
+  /* Vintage paper texture for cards - now uses the new custom colors and updated SVG pattern */
   .vintage-paper {
-    @apply bg-amber-50;
-    background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23d97706' fill-opacity='0.05'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z'/%3E%3C/g%3E%3C/svg%3E");
+    @apply bg-vintage-background;
+    /* Updated SVG fill color to match 'vintage-pattern-fill' and increased opacity */
+    background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23B45309' fill-opacity='0.1'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z'/%3E%3C/g%3E%3C/svg%3E");
   }
-  
+
   /* Book page flip animations */
   .page-flip-enter {
     transform: rotateY(0deg);
     transform-origin: left;
   }
-  
+
   .page-flip-enter-active {
     transform: rotateY(-180deg);
     transition: transform 600ms ease-in-out;
   }
-  
+
   .page-flip-exit {
     transform: rotateY(180deg);
     transform-origin: left;
   }
-  
+
   .page-flip-exit-active {
     transform: rotateY(0deg);
     transition: transform 600ms ease-in-out;
   }
-  
+
   /* Vintage decorative divider */
   .vintage-divider {
     @apply relative my-8 h-px bg-amber-300 dark:bg-amber-800;
   }
-  
+
   .vintage-divider::before {
     content: '❦';
-    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-amber-50 dark:bg-gray-900 px-4 text-amber-700 dark:text-amber-500;
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-vintage-background dark:bg-gray-900 px-4 text-amber-700 dark:text-amber-500;
   }
 }
 
@@ -100,16 +108,16 @@
   .text-shadow-vintage {
     text-shadow: 1px 1px 2px rgba(185, 128, 38, 0.15);
   }
-  
+
   /* Book spine gradient */
   .book-spine-gradient {
     background: linear-gradient(90deg, #b45309 0%, #d97706 50%, #92400e 100%);
   }
-  
+
   /* Leather texture */
   .leather-texture {
     background-color: #78350f;
-    background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23b45309' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M0 20L20 0h20v20L20 40H0V20zm10 17l15-15L40 7V0h-3L22 15 7 0H0v7l15 15L0 37v3h7l15-15 15 15h3v-7L25 18z'/%3E%3C/g%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23b45309' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M0 20L20 0h20v20L20 40H0V20zm10 17l15-15L40 7V0h-3L22 15 7 0H0v7l15 15L0 37v3h7l15-15 15 15h3v-7L25 18z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
 }
 /* In your index.css or App.css */
