@@ -15,7 +15,7 @@ const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased timeout to 20 seconds for proxy/external calls
 
-            // Fix for Error 7053: Safely merge headers
+            // Safely merge headers
             const defaultHeaders: Record<string, string> = {
                 'Content-Type': 'application/json',
                 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader)',
@@ -96,7 +96,8 @@ export const fetchGutenbergBooks = async (page = 1): Promise<BooksApiResponse> =
 
 export const searchGutenbergBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
     try {
-        const response = await fetchContentViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}&page=${page}`);
+        const response = await fetchContentViaProxy(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}`
+);
         const data = await response.json();
         return {
             ...data,
@@ -332,10 +333,7 @@ export const fetchBookById = async (id: number | string): Promise<Book> => {
             // Use BACKEND_BASE_URL for Internet Archive metadata proxy
             const response = await fetchWithRetry(`${BACKEND_BASE_URL}/api/archive/metadata/${id}`);
             const metadata = await response.json();
-            // --- FIX START ---
-            // Placeholder function - you NEED to implement the logic for this
             return await convertArchiveMetadataToBook(metadata);
-            // --- FIX END ---
         } catch (error) {
             console.warn('Book not found in Internet Archive via proxy...');
         }
@@ -464,8 +462,6 @@ const convertArchiveToBook = async (item: ArchiveItem): Promise<Book | null> => 
     return book;
 };
 
-
-// --- START OF THE MISSING FUNCTION (YOU NEED TO IMPLEMENT THIS LOGIC) ---
 // This function is expected to convert the *full metadata* response from Internet Archive's /metadata/:id endpoint
 // into your 'Book' type. The structure of this metadata might be different from ArchiveItem (which comes from search results).
 const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
@@ -500,8 +496,6 @@ const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
 
     return book;
 };
-// --- END OF THE MISSING FUNCTION ---
-
 
 // Enhanced book content fetching with support for all sources
 export const fetchBookContent = async (book: Book): Promise<string> => {
