@@ -155,6 +155,10 @@ const BookDetail: React.FC = () => {
             // This is crucial if not in reading mode or content was just fetched for PDF
             pdfContentRef.current.innerHTML = contentToRender || ''; // Ensure it's never null/undefined
 
+            // --- IMPORTANT: Add a small delay to allow content to render in the DOM ---
+            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay, adjust if needed
+            // --- END IMPORTANT ADDITION ---
+
             await downloadBookAsPDF(BOOK_CONTENT_DIV_ID, `${filename}.pdf`);
 
             // Clear the content from the hidden div after generating PDF
@@ -608,15 +612,17 @@ const BookDetail: React.FC = () => {
           left: '-9999px', // Position far off-screen
           top: '-9999px',
           width: '210mm', // A4 width, important for predictable PDF layout
-          height: '297mm', // A4 height
-          overflow: 'hidden', // Hide any overflow if content is briefly injected here
+          height: 'auto', // IMPORTANT: Allow height to expand
+          overflow: 'visible', // IMPORTANT: Ensure all content is captured even if it overflows
           visibility: 'hidden', // Hide it
-          // You might need to adjust font-size and line-height here
-          // to match your desired PDF output appearance more closely.
-          // These styles apply when content is *injected* into this hidden div.
+          // Apply print-friendly styles for PDF
+          padding: '20mm', // Simulate page margins
+          boxSizing: 'border-box', // Include padding in the width
           fontSize: '12pt',
           lineHeight: '1.5',
-          fontFamily: 'serif', // Match the prose class
+          fontFamily: 'serif', // Match the prose class for consistency
+          backgroundColor: '#fff', // Explicit white background
+          color: '#000', // Explicit black text
         }}
       >
         {/* Content will be injected here when PDF download is requested */}
