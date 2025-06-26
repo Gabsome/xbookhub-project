@@ -12,9 +12,10 @@ import { saveBookOffline, isBookAvailableOffline, removeOfflineBook } from '../s
 import { useAuth } from '../context/AuthContext';
 import { Book } from '../types';
 import DOMPurify from 'dompurify';
-import { downloadBookAsPDF } from '../utils/downloadBookAsPDF'; // Correctly import the utility
-
-const BOOK_CONTENT_DIV_ID = 'book-content-for-pdf';
+import downloadBookAsPDF from '../utils/downloadBookAsPDF';
+// Define a constant for the ID of the div used for PDF content
+// This is crucial for consistency and avoiding typos.
+const BOOK_CONTENT_FOR_PDF_ID = 'book-content-for-pdf';
 
 const BookDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +33,7 @@ const BookDetail: React.FC = () => {
   const [downloadFormat, setDownloadFormat] = useState<'txt' | 'html' | 'pdf'>('txt');
 
   // Ref to the div that contains the book content for PDF generation
+  // This ref should point to the hidden div that `html2canvas` will render.
   const pdfContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -96,7 +98,6 @@ const BookDetail: React.FC = () => {
       }
     } catch (err) {
       console.error('Error handling offline storage:', err);
-      // Changed alert to console.error for better Canvas compatibility
       console.error('Failed to save/remove book for offline use. See console for details.');
     }
   };
@@ -110,7 +111,6 @@ const BookDetail: React.FC = () => {
       }).catch(err => console.error('Error sharing:', err));
     } else {
       navigator.clipboard.writeText(window.location.href);
-      // Changed alert to console.log for better Canvas compatibility
       console.log('Link copied to clipboard!');
     }
   };
@@ -123,7 +123,7 @@ const BookDetail: React.FC = () => {
       setError(null);
       // Fetch content for reading. Here, we typically want the full HTML if available,
       // so we explicitly pass `cleanHtml: false`. DOMPurify will sanitize on the client-side.
-      const content = await fetchBookContent(book, requestedFormat, false); // Corrected call with cleanHtml: false
+      const content = await fetchBookContent(book, requestedFormat, false);
       setReadingContent(DOMPurify.sanitize(content, { USE_PROFILES: { html: true } }));
       setIsReadingMode(true);
     } catch (err) {
@@ -147,35 +147,34 @@ const BookDetail: React.FC = () => {
       const filename = `${book.title.replace(/[^a-zA-Z0-9]/g, '_')}_${book.id}`;
 
       if (downloadFormat === 'pdf') {
-        // For PDF generation (text-only), we explicitly request CLEANED HTML.
-        // The `fetchBookContent` function will now ensure the backend strips images.
-        console.log("Fetching content specifically for text-only PDF generation...");
-        // Pass `true` for `cleanHtml` to fetch stripped text content
-        const contentToRender = await fetchBookContent(book, 'html', true); // Corrected call
+        console.log("Initiating PDF download process...");
 
-        if (!contentToRender || contentToRender.trim().length === 0) {
-            throw new Error('No content available for PDF generation.');
+        // For PDF generation, we explicitly request CLEANED HTML (text-only)
+        // by passing `true` for `cleanHtml`. This ensures html2canvas focuses on text layout.
+        const contentForPdf = await fetchBookContent(book, 'html', true);
+
+        if (!contentForPdf || contentForPdf.trim().length === 0) {
+          throw new Error('No content available for PDF generation. The book might not have text content.');
         }
 
         if (pdfContentRef.current) {
-            // Temporarily set the cleaned, text-only content to the hidden div for html2canvas
-            pdfContentRef.current.innerHTML = contentToRender;
+          // Temporarily set the cleaned, text-only content to the hidden div
+          pdfContentRef.current.innerHTML = DOMPurify.sanitize(contentForPdf, { USE_PROFILES: { html: true } });
 
-            // IMPORTANT: Add a small delay to allow React to render the content into the DOM
-            // This delay is crucial for html2canvas to pick up the updated DOM.
-            await new Promise(resolve => setTimeout(resolve, 100)); // Increased delay slightly
+          // IMPORTANT: Add a small delay to allow the browser to render the content
+          // into the off-screen DOM, giving `html2canvas` a stable state to capture.
+          await new Promise(resolve => setTimeout(resolve, 50)); // A smaller delay might be enough, but 100ms is safer
 
-            // No need to wait for images, as content should be text-only
-            await downloadBookAsPDF(BOOK_CONTENT_DIV_ID, `${filename}.pdf`);
+          // Call the utility function to generate and download the PDF
+          await downloadBookAsPDF(BOOK_CONTENT_FOR_PDF_ID, `${filename}.pdf`);
 
-            // Clear the content from the hidden div after generating PDF
-            pdfContentRef.current.innerHTML = ''; // Always clear after PDF generation
+          // Clear the content from the hidden div after generating PDF
+          pdfContentRef.current.innerHTML = '';
         } else {
-            throw new Error("PDF content element reference not found in the DOM.");
+          throw new Error("PDF content element reference not found in the DOM. Cannot generate PDF.");
         }
       } else {
         // For 'txt' and 'html' downloads, continue using the existing downloadBookAsFile
-        // downloadBookAsFile will also use the updated fetchBookContent
         await downloadBookAsFile(book, downloadFormat);
       }
     } catch (err) {
@@ -244,7 +243,9 @@ const BookDetail: React.FC = () => {
     );
   }
 
-  // Reading Mode View
+  const sourceInfo = getSourceInfo();
+
+  // Reading Mode View (if enabled)
   if (isReadingMode && readingContent !== null) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -259,8 +260,8 @@ const BookDetail: React.FC = () => {
           <div className="flex items-center space-x-3">
             <div className="flex items-center gap-1 text-xs bg-amber-100 dark:bg-gray-800
               text-amber-800 dark:text-amber-300 px-2 py-1 rounded-full">
-              {getSourceInfo().icon}
-              <span>{getSourceInfo().name}</span>
+              {sourceInfo.icon}
+              <span>{sourceInfo.name}</span>
             </div>
 
             <button
@@ -294,10 +295,10 @@ const BookDetail: React.FC = () => {
             {book.title}
           </h1>
 
-          {/* This is the div that contains the book content for display and PDF conversion */}
+          {/* This div *is* the reading content displayed to the user.
+              It can also be picked up by html2canvas if we need to print the currently viewed content.
+              However, for a "text-only PDF", we use the hidden div below for more control. */}
           <div
-            id={BOOK_CONTENT_DIV_ID} // Crucial ID for html2pdf.js
-            ref={pdfContentRef} // Attach ref here
             className="prose prose-amber dark:prose-invert max-w-none font-serif text-amber-900 dark:text-amber-100"
             dangerouslySetInnerHTML={{ __html: readingContent }}
           />
@@ -305,8 +306,6 @@ const BookDetail: React.FC = () => {
       </div>
     );
   }
-
-  const sourceInfo = getSourceInfo();
 
   // Book Detail View
   return (
@@ -602,32 +601,40 @@ const BookDetail: React.FC = () => {
         </div>
       </div>
       {/* This hidden div will be used specifically for PDF generation when not in reading mode.
-          It must *always* be in the DOM to ensure `pdfContentRef.current` is available. */}
+          It must *always* be in the DOM to ensure `pdfContentRef.current` is available.
+          The `visibility: 'hidden'` and `opacity: 0` are key for `html2canvas` to render it
+          while keeping it off-screen and invisible to the user.
+          Crucially, it still needs layout properties (width, height, padding, font styles)
+          for html2canvas to render it correctly as if it were visible. */}
       <div
-        id={BOOK_CONTENT_DIV_ID}
+        id={BOOK_CONTENT_FOR_PDF_ID}
         ref={pdfContentRef}
         style={{
           position: 'absolute',
-          left: '-9999px', // Position far off-screen
+          left: '-9999px',
           top: '-9999px',
-          visibility: 'hidden', // Keep it hidden from user view
-          display: 'block', // Crucial: ensure it's treated as a block element for layout
-          // Provide a reasonable width to simulate a page, for html2canvas to render correctly
-          width: '8.5in', // Standard letter width, or '210mm' for A4
-          minHeight: '11in', // Minimum height, html2canvas will capture more if content overflows
-          // Ensure no scrollbars that might interfere with html2canvas calculation
-          overflow: 'hidden', // Or 'visible', depending on content rendering
-          opacity: 0, // Still make it completely transparent
-          // Important: Add default font/text styles so html2canvas doesn't default to tiny text
+          visibility: 'hidden', // Ensures it's not seen
+          display: 'block',     // Important for layout calculations by html2canvas
+          opacity: 0,           // Further ensures invisibility
+
+          // Set dimensions to mimic a standard page for consistent PDF output
+          width: '8.5in',       // Standard letter width (or '210mm' for A4)
+          minHeight: '11in',    // Ensures some base height, though html2canvas will expand for content
+          boxSizing: 'border-box', // Include padding in width/height
+          padding: '1in',       // Simulate typical page margins
+
+          // Essential for `html2canvas` to render text correctly (font size, line height, color)
           fontSize: '12pt',
           lineHeight: '1.5',
-          color: '#000',
+          fontFamily: 'serif', // Match your prose styles if possible
+          color: '#000',       // Ensure black text on white background for PDF
           backgroundColor: '#fff',
-          padding: '1in', // Simulate margins
-          boxSizing: 'border-box' // Include padding in width/height
+          overflow: 'hidden',  // Prevent scrollbars which can interfere with rendering
+          zIndex: -1           // Ensure it's behind everything else
         }}
+        aria-hidden="true" // For accessibility, indicate it's not meant for direct user interaction
       >
-        {/* Content will be injected here when PDF download is requested */}
+        {/* Content will be dynamically injected here when PDF download is requested */}
       </div>
     </motion.div>
   );
