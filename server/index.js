@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 // Use dynamic import for node-fetch to avoid commonJS/ESM issues
+// This line is correct. The error 'Argument expression expected' on it
+// typically indicates a syntax error *before* this line that throws off the parser.
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const path = require('path');
 
@@ -41,25 +43,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Helper function to clean HTML content for text-only purposes ---
 // This function aggressively strips ALL HTML tags, leaving only text.
+// This is perfect if you want a plain text PDF without any formatting or images.
 function cleanHtmlContent(html) {
     if (!html) return '';
     let cleaned = html
         .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
         .replace(/<style[^>]*>.*?<\/style>/gi, '')   // Remove style tags
-        .replace(/<!--.*?-->/g, '')                  // Remove HTML comments
-        .replace(/<[^>]*>/g, ' ')                    // Remove all other HTML tags (including img, p, div, etc.)
-        .replace(/&nbsp;/g, ' ')                     // Replace common HTML entities with spaces
+        .replace(/<!--[\s\S]*?-->/g, '')             // FIXED: Remove HTML comments
+        .replace(/<[^>]*>/g, ' ')                    // Remove all other HTML tags
+        .replace(/&nbsp;/g, ' ')                     // Replace common HTML entities
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
         .replace(/&apos;/g, "'")
-        .replace(/\s+/g, ' ')                        // Replace multiple spaces with a single space
+        .replace(/\s+/g, ' ')                        // Collapse whitespace
         .trim();
     return cleaned;
 }
-
 // --- HELPER FUNCTION FOR INTERNET ARCHIVE CONTENT URL RESOLUTION ---
 async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
     const metadataUrl = `https://archive.org/metadata/${iaIdentifier}`;
@@ -84,8 +86,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
 
         let bestMatchUrl = null;
         // The cleanHtml flag determines if the fetched content needs to be run through cleanHtmlContent.
-        // For 'html' format, we might want to clean it before sending to the client, especially for PDF generation.
-        let needsCleaningForClient = false; // Renamed for clarity, indicates if cleanHtmlContent should be applied
+        let needsCleaningForClient = false; // Indicates if cleanHtmlContent should be applied
 
         const downloadBaseUrl = `https://archive.org/download/${iaIdentifier}/`;
 
@@ -102,7 +103,8 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
             const foundFile = files.find(file => file.format === iaFormat);
             if (foundFile && foundFile.name) {
                 bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
-                needsCleaningForClient = (iaFormat === 'HTML' && requestedFormat === 'html'); // Only clean if we fetch HTML and client asks for HTML
+                // **Crucially, if the client wants 'html' and we get HTML from IA, we mark it for cleaning.**
+                needsCleaningForClient = (iaFormat === 'HTML' && requestedFormat === 'html');
                 console.log(`[IA Content Resolver] Found direct match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
                 return { url: bestMatchUrl, cleanHtml: needsCleaningForClient };
             }
@@ -117,6 +119,7 @@ async function getInternetArchiveContentUrl(iaIdentifier, requestedFormat) {
                 const foundFile = files.find(file => file.format === iaFormat);
                 if (foundFile && foundFile.name) {
                     bestMatchUrl = `${downloadBaseUrl}${encodeURIComponent(foundFile.name)}`;
+                    // Apply cleaning if fallback to HTML and client wants HTML (for PDF)
                     needsCleaningForClient = (iaFormat === 'HTML' && requestedFormat === 'html');
                     console.log(`[IA Content Resolver] Found fallback match for ${requestedFormat} (${iaFormat}): ${bestMatchUrl}`);
                     return { url: bestMatchUrl, cleanHtml: needsCleaningForClient };
@@ -268,6 +271,7 @@ app.get('/api/fetch-book', async (req, res) => {
         console.log(`[Proxy-Fetch] Successfully fetched ${content.length} characters from ${url}.`);
 
         // Apply cleaning if 'clean' parameter is 'true' and content is HTML
+        // This is where your cleaning function takes effect.
         if (clean === 'true' && contentType.includes('text/html')) {
             const cleanedContent = cleanHtmlContent(content); // This will remove all tags, including img
             console.log(`[Proxy-Fetch] Cleaned HTML content. Original length: ${content.length}, Cleaned length: ${cleanedContent.length}`);
@@ -465,7 +469,6 @@ app.get('/api/book/:source/:id/cover', async (req, res) => {
                     headers: { 'User-Agent': 'Xbook-Hub/1.0 (Educational Book Reader; +https://xbook-hub.netlify.app)' },
                     timeout: 7000 // 7-second timeout for metadata
                 });
-
                 if (metadataResponse.ok) {
                     const metadata = await metadataResponse.json();
                     bookTitle = metadata.metadata?.title;
@@ -660,10 +663,12 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
 
             if (format === 'txt') {
                 contentUrl = formats['text/plain; charset=utf-8'] || formats['text/plain'];
-                cleanHtmlForProxy = true; // Ensure HTML is cleaned if we get it
+                // Even for 'txt', if we end up getting HTML, we want it cleaned.
+                cleanHtmlForProxy = true;
             } else if (format === 'html') {
                 contentUrl = formats['text/html'] || formats['text/html; charset=utf-8'] || formats['text/html; charset=iso-8859-1'];
-                cleanHtmlForProxy = true; // For PDF, we want text, so clean HTML
+                // **Explicitly set to true for HTML format, especially for PDF generation where images are unwanted.**
+                cleanHtmlForProxy = true;
             } else if (format === 'pdf') {
                 contentUrl = formats['application/pdf'];
                 cleanHtmlForProxy = false; // PDFs are binary, no HTML cleaning
@@ -675,7 +680,10 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             // Fallback to text/plain or text/html if specific format not found
             if (!contentUrl) {
                 contentUrl = formats['text/plain; charset=utf-8'] || formats['text/plain'] || formats['text/html'];
-                if (contentUrl && contentUrl.includes('html')) cleanHtmlForProxy = true;
+                if (contentUrl && contentUrl.includes('html')) {
+                    // If fallback to HTML, ensure it's cleaned for text-only output
+                    cleanHtmlForProxy = true;
+                }
             }
 
             if (!contentUrl) {
@@ -691,7 +699,7 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
             const iaContent = await getInternetArchiveContentUrl(iaIdentifier, format);
             if (iaContent) {
                 contentUrl = iaContent.url;
-                cleanHtmlForProxy = iaContent.cleanHtml; // Use the flag from IA resolver
+                cleanHtmlForProxy = iaContent.cleanHtml; // Use the flag from IA resolver (already handles 'html' cleaning)
             } else {
                 console.warn(`[Content Resolver] getInternetArchiveContentUrl failed for IA ID ${iaIdentifier} in format ${format}.`);
                 return res.status(404).json({ error: `Content in ${format} format not available for Internet Archive item ID ${id}.` });
@@ -724,7 +732,8 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
                         console.log(`[Content Resolver] Google Books: Found PDF download link: ${contentUrl}`);
                     } else if (format === 'html' && accessInfo.webReaderLink) {
                         contentUrl = accessInfo.webReaderLink;
-                        cleanHtmlForProxy = true; // Web reader link content is typically HTML that can benefit from cleaning for PDF
+                        // **Explicitly set to true for HTML web reader link content.**
+                        cleanHtmlForProxy = true;
                         console.log(`[Content Resolver] Google Books: Found webReaderLink (HTML): ${contentUrl}`);
                     } else {
                         // Fallback: Prioritize EPUB, then PDF, then webReaderLink
@@ -738,6 +747,7 @@ app.get('/api/book/:source/:id/content', async (req, res) => {
                             console.log(`[Content Resolver] Google Books: Falling back to PDF: ${contentUrl}`);
                         } else if (accessInfo.webReaderLink) {
                             contentUrl = accessInfo.webReaderLink;
+                            // **Explicitly set to true if falling back to HTML web reader content.**
                             cleanHtmlForProxy = true;
                             console.log(`[Content Resolver] Google Books: Falling back to webReaderLink (HTML): ${contentUrl}`);
                         }
