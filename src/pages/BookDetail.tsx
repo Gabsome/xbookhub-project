@@ -162,7 +162,8 @@ const BookDetail: React.FC = () => {
             pdfContentRef.current.innerHTML = contentToRender;
 
             // IMPORTANT: Add a small delay to allow React to render the content into the DOM
-            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay
+            // This delay is crucial for html2canvas to pick up the updated DOM.
+            await new Promise(resolve => setTimeout(resolve, 100)); // Increased delay slightly
 
             // No need to wait for images, as content should be text-only
             await downloadBookAsPDF(BOOK_CONTENT_DIV_ID, `${filename}.pdf`);
@@ -609,13 +610,21 @@ const BookDetail: React.FC = () => {
           position: 'absolute',
           left: '-9999px', // Position far off-screen
           top: '-9999px',
-          visibility: 'hidden', // Hide it
-          // Note: Styles for PDF rendering are applied directly in downloadBookAsPDF.ts
-          // and then reverted. Minimal styles needed here for React's rendering.
-          width: '1px', // Keep it tiny when not in use
-          height: '1px',
-          overflow: 'hidden',
-          opacity: 0, // Ensure it's not visible at all
+          visibility: 'hidden', // Keep it hidden from user view
+          display: 'block', // Crucial: ensure it's treated as a block element for layout
+          // Provide a reasonable width to simulate a page, for html2canvas to render correctly
+          width: '8.5in', // Standard letter width, or '210mm' for A4
+          minHeight: '11in', // Minimum height, html2canvas will capture more if content overflows
+          // Ensure no scrollbars that might interfere with html2canvas calculation
+          overflow: 'hidden', // Or 'visible', depending on content rendering
+          opacity: 0, // Still make it completely transparent
+          // Important: Add default font/text styles so html2canvas doesn't default to tiny text
+          fontSize: '12pt',
+          lineHeight: '1.5',
+          color: '#000',
+          backgroundColor: '#fff',
+          padding: '1in', // Simulate margins
+          boxSizing: 'border-box' // Include padding in width/height
         }}
       >
         {/* Content will be injected here when PDF download is requested */}
