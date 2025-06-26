@@ -5,7 +5,8 @@ import {
   ArrowLeft, Bookmark, Download, Share, Book as BookIcon,
   Calendar, Clock, Users, FileText, File, Loader2, Globe, Archive, Library
 } from 'lucide-react';
-import { fetchBookById, fetchBookContent, downloadBookAsFile } from '../services/api';
+// Corrected import for fetchBookContent from your updated api.ts
+import { fetchBookById, fetchBookContent, downloadBookAsFile, getBookCoverUrl } from '../services/api';
 import { saveBook, getSavedBooks, removeSavedBook } from '../services/api';
 import { saveBookOffline, isBookAvailableOffline, removeOfflineBook } from '../services/offline';
 import { useAuth } from '../context/AuthContext';
@@ -95,7 +96,8 @@ const BookDetail: React.FC = () => {
       }
     } catch (err) {
       console.error('Error handling offline storage:', err);
-      alert('Failed to save/remove book for offline use. See console for details.');
+      // Changed alert to console.error for better Canvas compatibility
+      console.error('Failed to save/remove book for offline use. See console for details.');
     }
   };
 
@@ -108,20 +110,24 @@ const BookDetail: React.FC = () => {
       }).catch(err => console.error('Error sharing:', err));
     } else {
       navigator.clipboard.writeText(window.location.href);
-      alert('Link copied to clipboard!');
+      // Changed alert to console.log for better Canvas compatibility
+      console.log('Link copied to clipboard!');
     }
   };
 
-  const fetchBookContentForReading = async () => {
+  // This function fetches content for the *reading mode display*
+  const fetchBookContentForReading = async (requestedFormat: 'txt' | 'html' = 'html') => {
     if (!book) return;
     try {
       setIsLoadingContent(true);
       setError(null);
-      const content = await fetchBookContent(book);
+      // Fetch content for reading. Here, we typically want the full HTML if available,
+      // so we explicitly pass `cleanHtml: false`. DOMPurify will sanitize on the client-side.
+      const content = await fetchBookContent(book, requestedFormat, false); // Corrected call with cleanHtml: false
       setReadingContent(DOMPurify.sanitize(content, { USE_PROFILES: { html: true } }));
       setIsReadingMode(true);
     } catch (err) {
-      console.error('Error fetching book content:', err);
+      console.error('Error fetching book content for reading:', err);
       setError(err instanceof Error ? err.message : 'Failed to load book content. Please try again later.');
     } finally {
       setIsLoadingContent(false);
@@ -141,36 +147,34 @@ const BookDetail: React.FC = () => {
       const filename = `${book.title.replace(/[^a-zA-Z0-9]/g, '_')}_${book.id}`;
 
       if (downloadFormat === 'pdf') {
-        let contentToRender = readingContent; // Start with content if already loaded for reading
+        // For PDF generation (text-only), we explicitly request CLEANED HTML.
+        // The `fetchBookContent` function will now ensure the backend strips images.
+        console.log("Fetching content specifically for text-only PDF generation...");
+        // Pass `true` for `cleanHtml` to fetch stripped text content
+        const contentToRender = await fetchBookContent(book, 'html', true); // Corrected call
 
-        // If not in reading mode, or content hasn't been loaded yet
-        if (!contentToRender) {
-          console.log("Fetching content specifically for PDF generation...");
-          const fetchedContent = await fetchBookContent(book);
-          contentToRender = DOMPurify.sanitize(fetchedContent, { USE_PROFILES: { html: true } });
+        if (!contentToRender || contentToRender.trim().length === 0) {
+            throw new Error('No content available for PDF generation.');
         }
 
         if (pdfContentRef.current) {
-            // Temporarily set the content to the hidden div for html2canvas to capture
-            // This is crucial if not in reading mode or content was just fetched for PDF
-            pdfContentRef.current.innerHTML = contentToRender || ''; // Ensure it's never null/undefined
+            // Temporarily set the cleaned, text-only content to the hidden div for html2canvas
+            pdfContentRef.current.innerHTML = contentToRender;
 
-            // --- IMPORTANT: Add a small delay to allow content to render in the DOM ---
-            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay, adjust if needed
-            // --- END IMPORTANT ADDITION ---
+            // IMPORTANT: Add a small delay to allow React to render the content into the DOM
+            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay
 
+            // No need to wait for images, as content should be text-only
             await downloadBookAsPDF(BOOK_CONTENT_DIV_ID, `${filename}.pdf`);
 
             // Clear the content from the hidden div after generating PDF
-            // Only clear if we're not currently in reading mode
-            if (!isReadingMode) {
-                pdfContentRef.current.innerHTML = '';
-            }
+            pdfContentRef.current.innerHTML = ''; // Always clear after PDF generation
         } else {
             throw new Error("PDF content element reference not found in the DOM.");
         }
       } else {
         // For 'txt' and 'html' downloads, continue using the existing downloadBookAsFile
+        // downloadBookAsFile will also use the updated fetchBookContent
         await downloadBookAsFile(book, downloadFormat);
       }
     } catch (err) {
@@ -193,13 +197,7 @@ const BookDetail: React.FC = () => {
 
   const getCoverImage = () => {
     if (!book) return 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover';
-    if (book.formats && book.formats['image/jpeg']) {
-      return book.formats['image/jpeg'];
-    }
-    if (book.source === 'openlibrary' && book.cover_id) {
-      return `https://covers.openlibrary.org/b/id/${book.cover_id}-L.jpg`;
-    }
-    return 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover';
+    return getBookCoverUrl(book); // Using the helper from api.ts
   };
 
   if (loading) {
@@ -513,7 +511,7 @@ const BookDetail: React.FC = () => {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={fetchBookContentForReading}
+                    onClick={() => fetchBookContentForReading('html')} // Default to HTML for reading
                     disabled={isLoadingContent}
                     className="px-6 py-3 bg-amber-700 dark:bg-amber-800 text-white rounded-lg
                       shadow-md hover:bg-amber-800 dark:hover:bg-amber-700 transition-colors
@@ -611,18 +609,13 @@ const BookDetail: React.FC = () => {
           position: 'absolute',
           left: '-9999px', // Position far off-screen
           top: '-9999px',
-          width: '210mm', // A4 width, important for predictable PDF layout
-          height: 'auto', // IMPORTANT: Allow height to expand
-          overflow: 'visible', // IMPORTANT: Ensure all content is captured even if it overflows
           visibility: 'hidden', // Hide it
-          // Apply print-friendly styles for PDF
-          padding: '20mm', // Simulate page margins
-          boxSizing: 'border-box', // Include padding in the width
-          fontSize: '12pt',
-          lineHeight: '1.5',
-          fontFamily: 'serif', // Match the prose class for consistency
-          backgroundColor: '#fff', // Explicit white background
-          color: '#000', // Explicit black text
+          // Note: Styles for PDF rendering are applied directly in downloadBookAsPDF.ts
+          // and then reverted. Minimal styles needed here for React's rendering.
+          width: '1px', // Keep it tiny when not in use
+          height: '1px',
+          overflow: 'hidden',
+          opacity: 0, // Ensure it's not visible at all
         }}
       >
         {/* Content will be injected here when PDF download is requested */}
