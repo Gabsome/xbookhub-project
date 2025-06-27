@@ -16,7 +16,8 @@
     "express": "^4.21.2",
     "https-proxy-agent": "^7.0.6",
     "node-fetch": "^3.3.2",
-    "path-browserify": "^1.0.1"
+    "path-browserify": "^1.0.1",
+    "puppeteer": "^24.11.0"
   },
   "description": ""
 }
