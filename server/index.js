@@ -44,20 +44,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 // --- Helper function to clean HTML content for text-only purposes ---
 function cleanHtmlContent(html) {
     if (!html) return '';
+    
     let cleaned = html
-        .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
-        .replace(/<style[^>]*>.*?<\/style>/gi, '')   // Remove style tags
-        .replace(//g, '')             // Remove HTML comments
-        .replace(/<[^>]*>/g, ' ')                    // Remove all other HTML tags
-        .replace(/&nbsp;/g, ' ')                     // Replace common HTML entities
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&apos;/g, "'")
-        .replace(/\s+/g, ' ')                        // Collapse whitespace
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')  // Remove script tags
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')    // Remove style tags
+        .replace(/<!--[\s\S]*?-->/g, '')                   // Remove HTML comments
+        .replace(/<[^>]+>/g, ' ')                          // Remove all other HTML tags
+        .replace(/&nbsp;/gi, ' ')                          // Replace HTML entities
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/\s{2,}/g, ' ')                           // Collapse multiple spaces
         .trim();
+    
     return cleaned;
 }
 
