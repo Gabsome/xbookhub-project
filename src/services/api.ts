@@ -1,7 +1,7 @@
 import { BooksApiResponse, Book, OpenLibraryWork, OpenLibraryAuthor, ArchiveSearchResponse, ArchiveItem } from '../types';
 
 // Your backend base URL from environment variable, fallback to localhost for local development
-const API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL || 'https://xbookhub-project.onrender.com ';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL || 'https://xbookhub-project.onrender.com';
 
 // External API base URLs (used to construct the URL passed to your content proxy)
 const GUTENBERG_EXTERNAL_BASE = 'https://gutendex.com';
