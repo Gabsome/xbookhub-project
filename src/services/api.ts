@@ -1,24 +1,51 @@
-import { BooksApiResponse, Book, OpenLibraryWork, OpenLibraryAuthor, ArchiveSearchResponse, ArchiveItem } from '../types';
+import { BooksApiResponse, Book, OpenLibraryWork, OpenLibraryAuthor, ArchiveSearchResponse, ArchiveItem, SavedBook } from '../types';
 
-export const API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL || 'http://localhost:3001';
+// Use the deployed server URL by default
+export const API_BASE_URL = import.meta.env.VITE_PROXY_URL?.replace('/api/fetch-book', '') || 
+                            import.meta.env.VITE_BACKEND_API_BASE_URL || 
+                            'https://xbookhub-project.onrender.com';
+
 const GUTENBERG_EXTERNAL_BASE = 'https://gutendex.com';
 
 const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 3): Promise<Response> => {
     for (let i = 0; i < retries; i++) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000);
-            const response = await fetch(url, { ...options, signal: controller.signal });
+            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            
+            const response = await fetch(url, { 
+                ...options, 
+                signal: controller.signal,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers,
+                }
+            });
+            
             clearTimeout(timeoutId);
+            
             if (response.ok) return response;
+            
             if (response.status >= 500 && i < retries - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1500 * (i + 1)));
+                console.warn(`Server error ${response.status}, retrying... (${i + 1}/${retries})`);
+                await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
                 continue;
             }
+            
             throw new Error(`HTTP ${response.status}: ${response.statusText} for URL: ${url}`);
         } catch (error) {
+            if (error instanceof Error) {
+                if (error.name === 'AbortError') {
+                    console.warn(`Request timeout for ${url}, attempt ${i + 1}/${retries}`);
+                } else {
+                    console.warn(`Request failed for ${url}, attempt ${i + 1}/${retries}:`, error.message);
+                }
+            } else {
+                console.warn(`Request failed for ${url}, attempt ${i + 1}/${retries}:`, error);
+            }
+            
             if (i === retries - 1) throw error;
-            await new Promise(resolve => setTimeout(resolve, 1500 * (i + 1)));
+            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
         }
     }
     throw new Error('Max retries exceeded');
@@ -131,6 +158,7 @@ const convertOpenLibraryToBook = async (doc: any): Promise<Book | null> => {
         subjects: doc.subject || [],
         formats: {
             'text/html': doc.ia?.[0] ? `https://archive.org/details/${doc.ia[0]}` : undefined,
+            'text/plain': doc.ia?.[0] ? `https://archive.org/stream/${doc.ia[0]}/${doc.ia[0]}_djvu.txt` : undefined,
             'image/jpeg': doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : undefined,
         },
         download_count: 0,
@@ -171,6 +199,7 @@ const convertArchiveToBook = async (item: ArchiveItem): Promise<Book | null> => 
         subjects: item.subject ? (Array.isArray(item.subject) ? item.subject : [item.subject]) : [],
         formats: {
             'text/html': `https://archive.org/details/${item.identifier}`,
+            'text/plain': `https://archive.org/stream/${item.identifier}/${item.identifier}_djvu.txt`,
             'image/jpeg': `https://archive.org/services/img/${item.identifier}`,
         },
         download_count: item.downloads || 0,
@@ -188,6 +217,7 @@ const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
         subjects: meta.subject ? (Array.isArray(meta.subject) ? meta.subject : [meta.subject]) : [],
         formats: {
             'text/html': `https://archive.org/details/${meta.identifier}`,
+            'text/plain': `https://archive.org/stream/${meta.identifier}/${meta.identifier}_djvu.txt`,
             'image/jpeg': `https://archive.org/services/img/${meta.identifier}`,
         },
         download_count: parseInt(meta.downloads || '0'),
@@ -197,49 +227,93 @@ const convertArchiveMetadataToBook = async (metadata: any): Promise<Book> => {
 };
 
 export const fetchBookContent = async (book: Book, format: 'html' | 'txt' = 'html', cleanHtml: boolean = false): Promise<string> => {
-    let url = '';
+    const contentUrls: string[] = [];
+    
     if (book.source === 'gutenberg') {
-        url = book.formats['text/html'] || book.formats['text/plain'] || '';
-    } else if (book.ia_identifier) {
-        url = `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`;
-    } else {
-        url = book.formats['text/html'] || book.formats['text/plain'] || '';
+        if (format === 'html' && book.formats['text/html']) {
+            contentUrls.push(book.formats['text/html']);
+        }
+        if (book.formats['text/plain']) {
+            contentUrls.push(book.formats['text/plain']);
+        }
+        if (book.formats['text/html']) {
+            contentUrls.push(book.formats['text/html']);
+        }
+    } else if (book.source === 'archive' || book.source === 'openlibrary') {
+        if (book.ia_identifier) {
+            contentUrls.push(
+                `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`,
+                `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.txt`,
+                `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}.txt`,
+                `https://archive.org/download/${book.ia_identifier}/${book.ia_identifier}.pdf`,
+                `https://archive.org/details/${book.ia_identifier}`
+            );
+        }
+        if (book.formats['text/plain']) {
+            contentUrls.push(book.formats['text/plain']);
+        }
+        if (book.formats['text/html']) {
+            contentUrls.push(book.formats['text/html']);
+        }
     }
-    if (!url) throw new Error('No readable content format available.');
 
-    const response = await fetchContentViaProxy(url, cleanHtml);
-    if (!response.ok) throw new Error(`Failed to fetch content: ${response.statusText}`);
-    return response.text();
+    if (contentUrls.length === 0) {
+        throw new Error('No readable content format available for this book.');
+    }
+
+    for (const url of contentUrls) {
+        try {
+            console.log(`Attempting to fetch content from: ${url}`);
+            const response = await fetchContentViaProxy(url, cleanHtml);
+            
+            if (response.ok) {
+                const content = await response.text();
+                if (content && content.trim().length > 0) {
+                    console.log(`Successfully fetched content from: ${url} (${content.length} characters)`);
+                    return content;
+                }
+            }
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn(`Failed to fetch from ${url}:`, errorMessage);
+            continue;
+        }
+    }
+
+    throw new Error('Failed to fetch book content from any available source. The book may not have readable content available.');
 };
 
 export const downloadBookAsFile = async (book: Book, format: 'txt' | 'html' = 'txt'): Promise<void> => {
-    let url = '';
-    if (format === 'html' && book.formats['text/html']) url = book.formats['text/html'];
-    else url = book.formats['text/plain'] || book.formats['text/html'] || '';
-
-    if (!url) throw new Error(`${format.toUpperCase()} format not available.`);
-
-    const response = await fetchContentViaProxy(url, false);
-    if (!response.ok) throw new Error(`Failed to download: ${response.statusText}`);
-
-    const blob = await response.blob();
-    const link = document.createElement('a');
-    link.href = window.URL.createObjectURL(blob);
-    link.download = `${book.title.replace(/[^a-z0-9]/gi, '_')}.${format}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(link.href);
+    try {
+        const content = await fetchBookContent(book, format, false);
+        
+        const blob = new Blob([content], { 
+            type: format === 'html' ? 'text/html' : 'text/plain' 
+        });
+        
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = `${book.title.replace(/[^a-z0-9]/gi, '_')}.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(link.href);
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('Error downloading book:', errorMessage);
+        throw new Error(`Failed to download book in ${format.toUpperCase()} format: ${errorMessage}`);
+    }
 };
 
 export const saveBook = async (book: Book, userId: string): Promise<void> => {
     const savedBooks = getSavedBooks(userId);
     if (!savedBooks.some(b => b.id === book.id)) {
-        localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify([...savedBooks, { ...book, savedAt: new Date().toISOString() }]));
+        const savedBook: SavedBook = { ...book, savedAt: new Date().toISOString() };
+        localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify([...savedBooks, savedBook]));
     }
 };
 
-export const getSavedBooks = (userId: string): Book[] => {
+export const getSavedBooks = (userId: string): SavedBook[] => {
     const saved = localStorage.getItem(`xbook-saved-${userId}`);
     return saved ? JSON.parse(saved) : [];
 };
@@ -249,8 +323,16 @@ export const removeSavedBook = async (bookId: number | string, userId: string): 
     localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify(savedBooks.filter(b => b.id !== bookId)));
 };
 
+export const updateBookNote = async (bookId: number | string, userId: string, notes: string): Promise<void> => {
+    const savedBooks = getSavedBooks(userId);
+    const updatedBooks = savedBooks.map(book => 
+        book.id === bookId ? { ...book, notes } : book
+    );
+    localStorage.setItem(`xbook-saved-${userId}`, JSON.stringify(updatedBooks));
+};
+
 export const getBookCoverUrl = (book: Book): string => {
     if (book.source === 'archive' && book.ia_identifier) return `https://archive.org/services/img/${book.ia_identifier}`;
     if (book.formats['image/jpeg']) return book.formats['image/jpeg'];
-    return `${API_BASE_URL}/api/book/${book.source}/${book.id}/cover`;
+    return 'https://placehold.co/300x450/e9d8b6/453a22?text=No+Cover';
 };

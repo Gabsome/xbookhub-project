@@ -113,6 +113,18 @@ const BookDetail: React.FC = () => {
     }
   };
 
+  const getContentUrlForPDF = (book: Book): string => {
+    if (book.source === 'gutenberg') {
+      return book.formats['text/html'] || book.formats['text/plain'] || '';
+    } else if (book.source === 'archive' || book.source === 'openlibrary') {
+      if (book.ia_identifier) {
+        return `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`;
+      }
+      return book.formats['text/plain'] || book.formats['text/html'] || '';
+    }
+    return book.formats['text/html'] || book.formats['text/plain'] || '';
+  };
+
   const handleDownload = async () => {
     if (!book) {
       setError("No book data available for download.");
@@ -125,22 +137,20 @@ const BookDetail: React.FC = () => {
 
     try {
       if (downloadFormat === 'pdf') {
-        console.log("Initiating PDF download via server URL...");
+        console.log("Initiating PDF download via server...");
         
-        let contentUrl = '';
-        if (book.source === 'gutenberg') {
-            contentUrl = book.formats['text/html']?.replace('.images', '') || book.formats['text/plain'] || '';
-        } else if (book.ia_identifier) {
-            contentUrl = `https://archive.org/stream/${book.ia_identifier}/${book.ia_identifier}_djvu.txt`;
-        } else {
-            contentUrl = book.formats['text/html'] || book.formats['text/plain'] || '';
-        }
-
+        const contentUrl = getContentUrlForPDF(book);
+        
         if (!contentUrl) {
           throw new Error('No content URL found for this book to generate a PDF.');
         }
 
-        await downloadBookAsPDF(contentUrl, book.title, book.authors.map(a => a.name).join(', '), `${filename}.pdf`);
+        await downloadBookAsPDF(
+          contentUrl, 
+          book.title, 
+          book.authors.map(a => a.name).join(', '), 
+          `${filename}.pdf`
+        );
       } else {
         await downloadBookAsFile(book, downloadFormat as 'txt' | 'html');
       }
@@ -200,7 +210,9 @@ const BookDetail: React.FC = () => {
             <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2, duration: 0.5 }} className="relative">
               <img src={getCoverImage()} alt={`Cover for ${book.title}`} className="w-full max-w-xs object-cover rounded shadow-md border border-amber-200 dark:border-gray-700" />
               <div className="absolute -top-4 -right-4 flex space-x-2">
-                <motion.button whileTap={{ scale: 0.9 }} onClick={handleSaveBook} className={`p-3 rounded-full shadow-md ${isSaved ? 'bg-amber-200 text-amber-900' : 'bg-white text-amber-800'}`}><Bookmark className="h-5 w-5" /></motion.button>
+                {currentUser && (
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={handleSaveBook} className={`p-3 rounded-full shadow-md ${isSaved ? 'bg-amber-200 text-amber-900' : 'bg-white text-amber-800'}`}><Bookmark className="h-5 w-5" /></motion.button>
+                )}
                 <motion.button whileTap={{ scale: 0.9 }} onClick={handleToggleOffline} className={`p-3 rounded-full shadow-md ${isOffline ? 'bg-blue-200 text-blue-900' : 'bg-white text-amber-800'}`}><Download className="h-5 w-5" /></motion.button>
                 <motion.button whileTap={{ scale: 0.9 }} onClick={handleShareBook} className="p-3 rounded-full shadow-md bg-white text-amber-800"><Share className="h-5 w-5" /></motion.button>
               </div>
@@ -239,6 +251,11 @@ const BookDetail: React.FC = () => {
                       {isDownloading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Downloading...</> : <>{downloadFormat === 'pdf' ? <File className="h-4 w-4 mr-2" /> : <FileText className="h-4 w-4 mr-2" />}Download {downloadFormat.toUpperCase()}</>}
                     </motion.button>
                   </div>
+                  {downloadFormat === 'pdf' && (
+                    <p className="text-xs text-amber-700 dark:text-amber-500 mt-2">
+                      PDF generation may take a moment for books from Internet Archive.
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>

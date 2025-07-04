@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -21,7 +22,7 @@
     "jspdf": "^3.0.1",
     "lucide-react": "^0.344.0",
     "node-fetch": "^2.6.7",
-    "puppeteer": "^24.11.0",
+    "puppeteer": "^24.11.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.22.0",
