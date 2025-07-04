@@ -1,59 +1,48 @@
-import html2canvas from 'html2canvas'; // Import html2canvas
-import jsPDF from 'jspdf';             // Import jsPDF
+import { API_BASE_URL } from '../services/api';
 
 /**
- * Generates and downloads a PDF from a specified HTML element.
+ * Generates and downloads a PDF by sending the content URL to the backend service.
  *
- * @param elementId The ID of the HTML element to convert to PDF.
- * @param filename The desired filename for the downloaded PDF (e.g., "my-document.pdf").
+ * @param contentUrl The URL of the HTML content to convert to PDF.
+ * @param title The title of the book for the PDF metadata.
+ * @param author The author of the book for the PDF metadata.
+ * @param filename The desired filename for the downloaded PDF.
  */
-const downloadBookAsPDF = async (elementId: string, filename: string): Promise<void> => {
-  const input = document.getElementById(elementId);
-
-  if (!input) {
-    console.error(`Element with ID '${elementId}' not found.`);
-    return;
-  }
-
+const downloadBookAsPDF = async (contentUrl: string, title: string, author: string, filename:string): Promise<void> => {
   try {
-    // 1. Capture the HTML element as a canvas image
-    const canvas = await html2canvas(input, {
-      scale: 2, // Increase scale for better resolution in PDF
-      useCORS: true, // If your element contains images from other origins
+    const response = await fetch(`${API_BASE_URL}/api/generate-pdf-from-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ url: contentUrl, title, author }),
     });
 
-    // 2. Convert the canvas to a data URL (PNG format)
-    const imgData = canvas.toDataURL('image/png');
-
-    // 3. Initialize jsPDF
-    const pdf = new jsPDF('p', 'mm', 'a4'); // 'p' for portrait, 'mm' for millimeters, 'a4' for paper size
-
-    const imgWidth = 210; // A4 width in mm (210mm)
-    const pageHeight = 297; // A4 height in mm (297mm)
-
-    // Calculate the height of the image based on its aspect ratio and the desired width
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    // Add the first page
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-
-    // Add subsequent pages if the content is taller than one A4 page
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight; // Calculate position for the next part of the image
-      pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+    if (!response.ok) {
+      const errorText = await response.text();
+      try {
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || 'Failed to generate PDF on the server.');
+      } catch (e) {
+        throw new Error(`Server responded with status ${response.status}: ${errorText.substring(0, 200)}...`);
+      }
     }
 
-    // 4. Save the PDF
-    pdf.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    window.URL.revokeObjectURL(url);
 
   } catch (error) {
-    console.error("Error generating or downloading PDF:", error);
+    console.error("Error generating or downloading PDF via server:", error);
+    throw error;
   }
 };
 
