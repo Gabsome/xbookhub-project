@@ -88,6 +88,9 @@ async function generatePdfFromHtml(htmlContent, options = {}) {
         const browserInstance = await getBrowser();
         page = await browserInstance.newPage();
 
+        // Set a larger viewport for better PDF rendering
+        await page.setViewport({ width: 1200, height: 1600 });
+
         console.log('[PDF Generator] Setting HTML content on page.');
         await page.setContent(htmlContent, {
             waitUntil: 'networkidle0', // Wait until network is idle after setting content
@@ -99,6 +102,11 @@ async function generatePdfFromHtml(htmlContent, options = {}) {
             format: options.format || 'A4',
             printBackground: options.printBackground !== false, // Default to true
             margin: options.margin || { top: '0.5in', right: '0.5in', bottom: '0.5in', left: '0.5in' },
+            preferCSSPageSize: options.preferCSSPageSize || false,
+            displayHeaderFooter: options.displayHeaderFooter || false,
+            headerTemplate: options.headerTemplate || '<div></div>',
+            footerTemplate: options.footerTemplate || '<div style="font-size: 10px; text-align: center; width: 100%;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+            scale: options.scale || 0.8, // Slightly smaller scale for better text fitting
         };
 
         const pdfBuffer = await page.pdf(pdfOptions);

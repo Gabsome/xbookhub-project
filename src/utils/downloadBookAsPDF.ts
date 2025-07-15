@@ -5,7 +5,7 @@ const downloadBookAsPDF = async (contentUrl: string, title: string, author: stri
     console.log(`Requesting PDF generation for: ${contentUrl}`);
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large books
     
     const response = await fetch(`${API_BASE_URL}/api/generate-pdf-from-url`, {
       method: 'POST',
@@ -48,10 +48,16 @@ const downloadBookAsPDF = async (contentUrl: string, title: string, author: stri
       throw new Error('Server returned an empty PDF file');
     }
 
+    // Clean filename for better compatibility
+    const cleanFilename = filename
+      .replace(/[^a-zA-Z0-9\s\-_\.]/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_');
+    
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+    link.download = cleanFilename.endsWith('.pdf') ? cleanFilename : `${cleanFilename}.pdf`;
     
     document.body.appendChild(link);
     link.click();
@@ -59,13 +65,13 @@ const downloadBookAsPDF = async (contentUrl: string, title: string, author: stri
     
     window.URL.revokeObjectURL(url);
     
-    console.log(`PDF downloaded successfully: ${filename} (${blob.size} bytes)`);
+    console.log(`PDF downloaded successfully: ${cleanFilename} (${blob.size} bytes)`);
 
   } catch (error) {
     console.error("Error generating or downloading PDF via server:", error);
     
     if (error.name === 'AbortError') {
-      throw new Error('PDF generation timed out. The book content may be too large or the server is busy. Please try again later.');
+      throw new Error('PDF generation timed out. Large books may take several minutes to process. Please try again or try downloading as TXT/HTML instead.');
     }
     
     throw new Error(`PDF generation failed: ${error.message}`);

@@ -261,32 +261,50 @@ app.post('/api/generate-pdf-from-url', async (req, res) => {
                         body { 
                             font-family: 'Times New Roman', serif; 
                             line-height: 1.6; 
-                            margin: 40px;
+                            margin: 20px;
                             color: #333;
-                            max-width: 800px;
+                            max-width: 100%;
+                            font-size: 12px;
                         }
                         h1 { 
                             color: #2c3e50; 
                             border-bottom: 2px solid #3498db; 
                             padding-bottom: 10px; 
                             margin-bottom: 20px;
+                            font-size: 18px;
+                            page-break-after: avoid;
                         }
                         h2 { 
                             color: #34495e; 
                             margin-top: 30px; 
                             margin-bottom: 15px;
+                            font-size: 16px;
+                            page-break-after: avoid;
                         }
                         .content { 
                             white-space: pre-wrap; 
-                            font-size: 14px;
+                            font-size: 12px;
                             line-height: 1.8;
+                            text-align: justify;
+                            hyphens: auto;
+                            word-wrap: break-word;
                         }
                         .header {
                             text-align: center;
                             margin-bottom: 40px;
+                            page-break-after: avoid;
                         }
                         @page {
-                            margin: 0.5in;
+                            margin: 0.75in;
+                            size: A4;
+                        }
+                        p {
+                            margin-bottom: 1em;
+                            orphans: 3;
+                            widows: 3;
+                        }
+                        .page-break {
+                            page-break-before: always;
                         }
                     </style>
                 </head>
@@ -300,6 +318,7 @@ app.post('/api/generate-pdf-from-url', async (req, res) => {
                 </body>
                 </html>`;
         } else if (contentType.includes('text/html')) {
+            // Clean up HTML content more thoroughly
             content = content
                 .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                 .replace(/<link[^>]*>/gi, '')
@@ -309,16 +328,22 @@ app.post('/api/generate-pdf-from-url', async (req, res) => {
                 .replace(/<embed[^>]*>/gi, '')
                 .replace(/<form[^>]*>.*?<\/form>/gi, '')
                 .replace(/<input[^>]*>/gi, '')
-                .replace(/<button[^>]*>.*?<\/button>/gi, '');
+                .replace(/<button[^>]*>.*?<\/button>/gi, '')
+                .replace(/<nav[^>]*>.*?<\/nav>/gi, '')
+                .replace(/<header[^>]*>.*?<\/header>/gi, '')
+                .replace(/<footer[^>]*>.*?<\/footer>/gi, '')
+                .replace(/<aside[^>]*>.*?<\/aside>/gi, '')
+                .replace(/style\s*=\s*["'][^"']*["']/gi, ''); // Remove inline styles
 
             const styleTag = `
                 <style>
                     body { 
                         font-family: 'Times New Roman', serif; 
                         line-height: 1.6; 
-                        margin: 40px;
+                        margin: 20px;
                         color: #333;
-                        max-width: 800px;
+                        max-width: 100%;
+                        font-size: 12px;
                     }
                     img { 
                         display: none; 
@@ -326,25 +351,65 @@ app.post('/api/generate-pdf-from-url', async (req, res) => {
                     h1, h2, h3, h4, h5, h6 { 
                         color: #2c3e50; 
                         page-break-after: avoid;
+                        margin-top: 1.5em;
+                        margin-bottom: 0.5em;
                     }
+                    h1 { font-size: 18px; }
+                    h2 { font-size: 16px; }
+                    h3 { font-size: 14px; }
+                    h4, h5, h6 { font-size: 12px; }
                     p { 
                         margin-bottom: 1em; 
                         text-align: justify;
+                        orphans: 3;
+                        widows: 3;
+                        hyphens: auto;
+                        word-wrap: break-word;
+                    }
+                    blockquote {
+                        margin: 1em 2em;
+                        padding: 0.5em 1em;
+                        border-left: 3px solid #3498db;
+                        font-style: italic;
+                    }
+                    ul, ol {
+                        margin: 1em 0;
+                        padding-left: 2em;
+                    }
+                    li {
+                        margin-bottom: 0.5em;
                     }
                     .header { 
                         border-bottom: 2px solid #3498db; 
                         padding-bottom: 10px; 
                         margin-bottom: 20px; 
                         text-align: center;
+                        page-break-after: avoid;
                     }
                     @page {
-                        margin: 0.5in;
+                        margin: 0.75in;
+                        size: A4;
                         @bottom-center {
-                            content: counter(page);
+                            content: counter(page) " / " counter(pages);
                         }
                     }
                     .page-break {
                         page-break-before: always;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin: 1em 0;
+                        font-size: 11px;
+                    }
+                    th, td {
+                        border: 1px solid #ddd;
+                        padding: 0.5em;
+                        text-align: left;
+                    }
+                    th {
+                        background-color: #f5f5f5;
+                        font-weight: bold;
                     }
                 </style>`;
 
@@ -370,11 +435,12 @@ app.post('/api/generate-pdf-from-url', async (req, res) => {
         const pdfBuffer = await generatePdfFromHtml(content, {
             format: 'A4',
             printBackground: true,
-            margin: { top: '0.5in', right: '0.5in', bottom: '0.5in', left: '0.5in' },
+            margin: { top: '0.75in', right: '0.75in', bottom: '0.75in', left: '0.75in' },
             preferCSSPageSize: false,
             displayHeaderFooter: true,
             headerTemplate: '<div></div>',
-            footerTemplate: '<div style="font-size: 10px; text-align: center; width: 100%;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>'
+            footerTemplate: '<div style="font-size: 10px; text-align: center; width: 100%; margin-top: 10px;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+            scale: 0.8
         });
 
         console.log(`PDF generated successfully, size: ${pdfBuffer.length} bytes`);

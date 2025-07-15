@@ -57,13 +57,13 @@ const fetchContentViaProxy = async (externalUrl: string, cleanHtml: boolean = fa
 };
 
 export const fetchGutenbergBooks = async (page = 1): Promise<BooksApiResponse> => {
-    const response = await fetchWithRetry(`${GUTENBERG_EXTERNAL_BASE}/books?page=${page}`);
+    const response = await fetchWithRetry(`${GUTENBERG_EXTERNAL_BASE}/books?page=${page}&sort=download_count`);
     const data = await response.json();
     return { ...data, source: 'gutenberg', results: data.results.map((book: any) => ({ ...book, source: 'gutenberg' })) };
 };
 
 export const searchGutenbergBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
-    const response = await fetchWithRetry(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}&page=${page}`);
+    const response = await fetchWithRetry(`${GUTENBERG_EXTERNAL_BASE}/books?search=${encodeURIComponent(query)}&page=${page}&sort=download_count`);
     const data = await response.json();
     return { ...data, source: 'gutenberg', results: data.results.map((book: any) => ({ ...book, source: 'gutenberg' })) };
 };
@@ -99,33 +99,70 @@ export const searchArchiveBooks = async (query: string, page = 1, limit = 20): P
 };
 
 export const fetchBooks = async (page = 1): Promise<BooksApiResponse> => {
-    const [gutenberg, openLibrary, archive] = await Promise.allSettled([
-        fetchGutenbergBooks(page),
-        fetchOpenLibraryBooks(page),
-        fetchArchiveBooks(page)
-    ]);
-    const allBooks = [
-        ...(gutenberg.status === 'fulfilled' ? gutenberg.value.results : []),
-        ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results : []),
-        ...(archive.status === 'fulfilled' ? archive.value.results : [])
-    ];
-    const totalCount = (gutenberg.status === 'fulfilled' ? gutenberg.value.count : 0) + (openLibrary.status === 'fulfilled' ? openLibrary.value.count : 0) + (archive.status === 'fulfilled' ? archive.value.count : 0);
-    return { count: totalCount, next: totalCount > page * 20 ? `page=${page + 1}` : null, previous: page > 1 ? `page=${page - 1}` : null, results: allBooks.sort(() => Math.random() - 0.5).slice(0, 20), source: 'gutenberg' };
+    // For better infinite scroll, we'll primarily use Gutenberg with occasional mixing
+    const gutenbergResponse = await fetchGutenbergBooks(page);
+    
+    // Mix in some books from other sources every few pages
+    if (page % 3 === 0) {
+        const [openLibrary, archive] = await Promise.allSettled([
+            fetchOpenLibraryBooks(Math.ceil(page / 3)),
+            fetchArchiveBooks(Math.ceil(page / 3))
+        ]);
+        
+        const additionalBooks = [
+            ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results.slice(0, 5) : []),
+            ...(archive.status === 'fulfilled' ? archive.value.results.slice(0, 5) : [])
+        ];
+        
+        gutenbergResponse.results = [...gutenbergResponse.results, ...additionalBooks]
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 20);
+    }
+    
+    return gutenbergResponse;
 };
 
 export const searchBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {
+    // For search, we want to get results from all sources but prioritize relevance
     const [gutenberg, openLibrary, archive] = await Promise.allSettled([
         searchGutenbergBooks(query, page),
-        searchOpenLibraryBooks(query, page),
-        searchArchiveBooks(query, page)
+        searchOpenLibraryBooks(query, Math.ceil(page / 2)),
+        searchArchiveBooks(query, Math.ceil(page / 2))
     ]);
+    
     const allBooks = [
         ...(gutenberg.status === 'fulfilled' ? gutenberg.value.results : []),
-        ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results : []),
-        ...(archive.status === 'fulfilled' ? archive.value.results : [])
+        ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results.slice(0, 10) : []),
+        ...(archive.status === 'fulfilled' ? archive.value.results.slice(0, 10) : [])
     ];
-    const totalCount = (gutenberg.status === 'fulfilled' ? gutenberg.value.count : 0) + (openLibrary.status === 'fulfilled' ? openLibrary.value.count : 0) + (archive.status === 'fulfilled' ? archive.value.count : 0);
-    return { count: totalCount, next: totalCount > page * 20 ? `page=${page + 1}` : null, previous: page > 1 ? `page=${page - 1}` : null, results: allBooks.sort((a, b) => (b.title.toLowerCase().includes(query.toLowerCase()) ? 1 : 0) - (a.title.toLowerCase().includes(query.toLowerCase()) ? 1 : 0)).slice(0, 20), source: 'gutenberg' };
+    
+    // Sort by relevance (title match first, then other factors)
+    const sortedBooks = allBooks.sort((a, b) => {
+        const aTitle = a.title.toLowerCase();
+        const bTitle = b.title.toLowerCase();
+        const queryLower = query.toLowerCase();
+        
+        const aTitleMatch = aTitle.includes(queryLower) ? 1 : 0;
+        const bTitleMatch = bTitle.includes(queryLower) ? 1 : 0;
+        
+        if (aTitleMatch !== bTitleMatch) {
+            return bTitleMatch - aTitleMatch;
+        }
+        
+        return b.download_count - a.download_count;
+    });
+    
+    const totalCount = (gutenberg.status === 'fulfilled' ? gutenberg.value.count : 0) + 
+                     (openLibrary.status === 'fulfilled' ? openLibrary.value.count : 0) + 
+                     (archive.status === 'fulfilled' ? archive.value.count : 0);
+    
+    return { 
+        count: totalCount, 
+        next: sortedBooks.length >= 20 && totalCount > page * 20 ? `page=${page + 1}` : null, 
+        previous: page > 1 ? `page=${page - 1}` : null, 
+        results: sortedBooks.slice(0, 20), 
+        source: 'gutenberg' 
+    };
 };
 
 export const fetchBookById = async (id: number | string): Promise<Book> => {

@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Book as BookIcon, ChevronUp } from 'lucide-react';
+import { Book as BookIcon, ChevronUp, Loader2 } from 'lucide-react';
 import BookCard from '../components/BookCard';
 import { fetchBooks, searchBooks } from '../services/api';
 import { Book } from '../types';
 
 const Home: React.FC = () => {
-  // Separate states for initial books and subsequently loaded books
-  const [initialBooks, setInitialBooks] = useState<Book[]>([]);
-  const [additionalBooks, setAdditionalBooks] = useState<Book[]>([]);
-  const [currentPage, setCurrentPage] = useState(1); // Track current page number
-  const [hasMore, setHasMore] = useState(true); // Indicates if there are more pages to load
+  const [books, setBooks] = useState<Book[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -23,58 +22,79 @@ const Home: React.FC = () => {
   const searchParams = new URLSearchParams(location.search);
   const searchQuery = searchParams.get('search');
 
-  // Function to load books for a given page, handles both initial and subsequent loads
-  const loadPageOfBooks = useCallback(async (page: number, query?: string | null) => {
+  // Function to load books for a given page
+  const loadBooks = useCallback(async (page: number, query?: string | null, isNewSearch = false) => {
+    if (isLoading) return; // Prevent multiple simultaneous requests
+    
     setIsLoading(true);
     setError(null);
+    
     try {
+      console.log(`Loading books - Page: ${page}, Query: ${query || 'none'}, IsNewSearch: ${isNewSearch}`);
+      
       const response = query
-        ? await searchBooks(query, page) // Pass page to searchBooks
-        : await fetchBooks(page); // Pass page to fetchBooks
+        ? await searchBooks(query, page)
+        : await fetchBooks(page);
 
-      if (page === 1) {
-        // This is the initial load or a new search, so update initialBooks
-        setInitialBooks(response.results);
-        setAdditionalBooks([]); // Clear additional books on a new search or initial load
+      console.log(`Loaded ${response.results.length} books for page ${page}`);
+
+      if (isNewSearch || page === 1) {
+        // Reset books for new search or initial load
+        setBooks(response.results);
+        setCurrentPage(1);
       } else {
-        // Append to additional books for subsequent pages
-        setAdditionalBooks(prev => [...prev, ...response.results]);
+        // Append to existing books for pagination
+        setBooks(prev => {
+          const existingIds = new Set(prev.map(book => book.id));
+          const newBooks = response.results.filter(book => !existingIds.has(book.id));
+          console.log(`Adding ${newBooks.length} new books to existing ${prev.length} books`);
+          return [...prev, ...newBooks];
+        });
+        setCurrentPage(page);
       }
-      setCurrentPage(page);
-      // Determine if there's a next page. 'response.next' can be a URL or 'null'
-      setHasMore(!!response.next);
+      
+      // Check if there are more pages
+      setHasMore(!!response.next && response.results.length > 0);
+      
     } catch (err) {
+      console.error('Error loading books:', err);
       setError('Failed to load books. Please try again later.');
-      console.error('Error fetching books:', err);
-      setHasMore(false); // Stop trying to load more if there's an error
+      setHasMore(false);
     } finally {
       setIsLoading(false);
+      setIsInitialLoading(false);
     }
-  }, []); // Dependencies for useCallback: none, as it handles its own internal state updates
+  }, [isLoading]);
 
-  // Intersection Observer callback to load more books
+  // Intersection Observer callback for infinite scroll
   const lastBookElementRef = useCallback((node: HTMLDivElement | null) => {
-    if (isLoading || !hasMore) return; // Don't load if already loading or no more pages
+    if (isLoading || !hasMore) return;
 
     if (observer.current) observer.current.disconnect();
 
     observer.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && hasMore && !isLoading) {
-        // Load the next page
-        loadPageOfBooks(currentPage + 1, searchQuery);
+        console.log('Loading next page due to intersection');
+        loadBooks(currentPage + 1, searchQuery);
       }
+    }, {
+      threshold: 0.1,
+      rootMargin: '100px' // Start loading when element is 100px away from viewport
     });
 
     if (node) observer.current.observe(node);
-  }, [isLoading, hasMore, currentPage, searchQuery, loadPageOfBooks]);
+  }, [isLoading, hasMore, currentPage, searchQuery, loadBooks]);
 
   // Effect to handle initial load or search query changes
   useEffect(() => {
-    // When searchQuery changes or on initial mount, load the first page
-    loadPageOfBooks(1, searchQuery);
-    // Reset scroll position when search query changes
+    console.log('Search query changed:', searchQuery);
+    setBooks([]);
+    setCurrentPage(1);
+    setHasMore(true);
+    setIsInitialLoading(true);
+    loadBooks(1, searchQuery, true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [searchQuery, loadPageOfBooks]); // Depend on searchQuery and loadPageOfBooks
+  }, [searchQuery]);
 
   // Effect to track scroll position for the "Scroll to Top" button
   useEffect(() => {
@@ -94,7 +114,16 @@ const Home: React.FC = () => {
     });
   };
 
-  const allBooksDisplayed = [...initialBooks, ...additionalBooks];
+  if (isInitialLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="flex items-center space-x-2">
+          <Loader2 className="h-8 w-8 text-amber-700 dark:text-amber-500 animate-spin" />
+          <span className="text-amber-800 dark:text-amber-400">Loading books...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">
@@ -122,62 +151,46 @@ const Home: React.FC = () => {
           </div>
         )}
 
-        {/* Display Initial Books Section */}
-        {initialBooks.length > 0 && (
-          <section className="mb-8"> {/* Added a section for initial books */}
-            <h2 className="sr-only">Initial Books</h2> {/* Accessibility title */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-              {initialBooks.map(book => (
-                <BookCard key={book.id} book={book} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Separator or title for additional books, only if initial books loaded and there's more to show */}
-        {initialBooks.length > 0 && hasMore && (
-          <div className="text-center my-8">
-            <h2 className="text-xl md:text-2xl font-serif font-bold text-amber-900 dark:text-amber-300">
-              More to Explore
-            </h2>
-            <p className="mt-2 text-amber-800 dark:text-amber-400">
-              Keep scrolling to discover more books...
-            </p>
+        {/* Books Grid */}
+        {books.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            {books.map((book, index) => {
+              // Attach ref to the last few book cards for better infinite scrolling
+              if (books.length === index + 1) {
+                return (
+                  <div ref={lastBookElementRef} key={`${book.source}-${book.id}`}>
+                    <BookCard book={book} />
+                  </div>
+                );
+              } else {
+                return <BookCard key={`${book.source}-${book.id}`} book={book} />;
+              }
+            })}
           </div>
         )}
 
-        {/* Display Additional Books Section */}
-        {additionalBooks.length > 0 && (
-          <section> {/* Added a section for additional books */}
-            <h2 className="sr-only">Additional Books</h2> {/* Accessibility title */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-              {additionalBooks.map((book, index) => {
-                // Attach ref to the last book card for infinite scrolling
-                if (additionalBooks.length === index + 1) {
-                  return (
-                    <div ref={lastBookElementRef} key={book.id}>
-                      <BookCard book={book} />
-                    </div>
-                  );
-                } else {
-                  return <BookCard key={book.id} book={book} />;
-                }
-              })}
-            </div>
-          </section>
-        )}
-
-        {isLoading && (
+        {/* Loading indicator for pagination */}
+        {isLoading && !isInitialLoading && (
           <div className="flex justify-center mt-10">
             <div className="flex items-center space-x-2">
-              <BookIcon className="h-6 w-6 text-amber-700 dark:text-amber-500 animate-pulse" />
+              <Loader2 className="h-6 w-6 text-amber-700 dark:text-amber-500 animate-spin" />
               <span className="text-amber-800 dark:text-amber-400">Loading more books...</span>
             </div>
           </div>
         )}
 
-        {/* No books found state - check both initial and additional */}
-        {!isLoading && allBooksDisplayed.length === 0 && (
+        {/* End of results indicator */}
+        {!hasMore && books.length > 0 && !isLoading && (
+          <div className="text-center mt-10 py-8">
+            <BookIcon className="h-12 w-12 text-amber-300 dark:text-amber-700 mx-auto mb-4" />
+            <p className="text-amber-700 dark:text-amber-500">
+              You've reached the end of our collection for this search.
+            </p>
+          </div>
+        )}
+
+        {/* No books found state */}
+        {!isLoading && !isInitialLoading && books.length === 0 && (
           <div className="text-center py-12">
             <BookIcon className="h-16 w-16 text-amber-300 dark:text-amber-700 mx-auto mb-4" />
             <h3 className="text-xl font-serif font-medium text-amber-900 dark:text-amber-300">
@@ -195,7 +208,9 @@ const Home: React.FC = () => {
         <motion.button
           className={`fixed right-6 bottom-6 p-3 rounded-full bg-amber-100 dark:bg-gray-800
             text-amber-800 dark:text-amber-400 shadow-lg border border-amber-200
-            dark:border-gray-700 z-10 ${showScrollTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            dark:border-gray-700 z-10 transition-opacity duration-200 ${
+              showScrollTop ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
           onClick={scrollToTop}
           initial={{ scale: 0.8 }}
           animate={{ scale: showScrollTop ? 1 : 0.8 }}
