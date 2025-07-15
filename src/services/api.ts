@@ -99,27 +99,39 @@ export const searchArchiveBooks = async (query: string, page = 1, limit = 20): P
 };
 
 export const fetchBooks = async (page = 1): Promise<BooksApiResponse> => {
-    // For better infinite scroll, we'll primarily use Gutenberg with occasional mixing
-    const gutenbergResponse = await fetchGutenbergBooks(page);
-    
-    // Mix in some books from other sources every few pages
-    if (page % 3 === 0) {
-        const [openLibrary, archive] = await Promise.allSettled([
-            fetchOpenLibraryBooks(Math.ceil(page / 3)),
-            fetchArchiveBooks(Math.ceil(page / 3))
-        ]);
+    try {
+        // For better infinite scroll, we'll primarily use Gutenberg with occasional mixing
+        const gutenbergResponse = await fetchGutenbergBooks(page);
         
-        const additionalBooks = [
-            ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results.slice(0, 5) : []),
-            ...(archive.status === 'fulfilled' ? archive.value.results.slice(0, 5) : [])
-        ];
+        // Mix in some books from other sources every few pages
+        if (page % 3 === 0) {
+            const [openLibrary, archive] = await Promise.allSettled([
+                fetchOpenLibraryBooks(Math.ceil(page / 3)),
+                fetchArchiveBooks(Math.ceil(page / 3))
+            ]);
+            
+            const additionalBooks = [
+                ...(openLibrary.status === 'fulfilled' ? openLibrary.value.results.slice(0, 5) : []),
+                ...(archive.status === 'fulfilled' ? archive.value.results.slice(0, 5) : [])
+            ];
+            
+            gutenbergResponse.results = [...gutenbergResponse.results, ...additionalBooks]
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 20);
+        }
         
-        gutenbergResponse.results = [...gutenbergResponse.results, ...additionalBooks]
-            .sort(() => Math.random() - 0.5)
-            .slice(0, 20);
+        return gutenbergResponse;
+    } catch (error) {
+        console.error('Error fetching books:', error);
+        // Return empty response on error
+        return {
+            count: 0,
+            next: null,
+            previous: null,
+            results: [],
+            source: 'gutenberg'
+        };
     }
-    
-    return gutenbergResponse;
 };
 
 export const searchBooks = async (query: string, page = 1): Promise<BooksApiResponse> => {

@@ -18,7 +18,9 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ?
     'http://localhost:5000',
     'http://localhost:5174',
     'https://localhost:5173',
-    'https://localhost:5174'
+    'https://localhost:5174',
+    'http://127.0.0.1:5173',
+    'https://127.0.0.1:5173'
   ];
 
 // --- Middleware ---

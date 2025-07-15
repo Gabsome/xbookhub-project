@@ -24,7 +24,7 @@ const Home: React.FC = () => {
 
   // Function to load books for a given page
   const loadBooks = useCallback(async (page: number, query?: string | null, isNewSearch = false) => {
-    if (isLoading) return; // Prevent multiple simultaneous requests
+    if (isLoading && !isNewSearch) return; // Prevent multiple simultaneous requests except for new searches
     
     setIsLoading(true);
     setError(null);
@@ -68,7 +68,7 @@ const Home: React.FC = () => {
 
   // Intersection Observer callback for infinite scroll
   const lastBookElementRef = useCallback((node: HTMLDivElement | null) => {
-    if (isLoading || !hasMore) return;
+    if (isLoading) return;
 
     if (observer.current) observer.current.disconnect();
 
@@ -78,12 +78,12 @@ const Home: React.FC = () => {
         loadBooks(currentPage + 1, searchQuery);
       }
     }, {
-      threshold: 0.1,
-      rootMargin: '100px' // Start loading when element is 100px away from viewport
+      threshold: 0.5,
+      rootMargin: '200px' // Start loading when element is 200px away from viewport
     });
 
     if (node) observer.current.observe(node);
-  }, [isLoading, hasMore, currentPage, searchQuery, loadBooks]);
+  }, [hasMore, currentPage, searchQuery, loadBooks]);
 
   // Effect to handle initial load or search query changes
   useEffect(() => {

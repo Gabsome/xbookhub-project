@@ -9,17 +9,25 @@ let browser; // Declare browser variable outside to potentially reuse
 async function getBrowser() {
     if (!browser) {
         console.log('[Puppeteer] Launching new browser instance...');
-        browser = await puppeteer.launch({
-            headless: true, // Run Chrome in headless mode (no GUI)
-            args: [
-                '--no-sandbox', // Required for many Linux environments (e.g., Docker, Netlify Functions)
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', // Overcomes limited resource problems in Docker/certain environments
-                '--disable-accelerated-video-decode',
-                '--no-zygote', // Helps with stability in some environments
-                '--single-process' // Ensures only one process for the browser, good for limited memory
-            ]
-        });
+        try {
+            browser = await puppeteer.launch({
+                headless: true, // Run Chrome in headless mode (no GUI)
+                args: [
+                    '--no-sandbox', // Required for many Linux environments (e.g., Docker, Netlify Functions)
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage', // Overcomes limited resource problems in Docker/certain environments
+                    '--disable-accelerated-video-decode',
+                    '--no-zygote', // Helps with stability in some environments
+                    '--single-process', // Ensures only one process for the browser, good for limited memory
+                    '--disable-gpu',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor'
+                ]
+            });
+        } catch (error) {
+            console.error('[Puppeteer] Failed to launch browser:', error);
+            throw new Error(`Failed to launch browser: ${error.message}`);
+        }
         console.log('[Puppeteer] Browser launched successfully.');
     }
     return browser;
